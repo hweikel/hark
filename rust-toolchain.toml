@@ -1,0 +1,14 @@
+# Keeps the two machines on one compiler.
+#
+# The Linux side gets its toolchain from `flake.nix` and ignores this file —
+# nixpkgs puts its own cargo on PATH ahead of any rustup shim. It exists for
+# the macOS side, where there is no Nix and rustup reads this to install and
+# select the matching version automatically.
+#
+# Track whatever `nix develop --command rustc --version` reports, so a build
+# that passes on one machine means something on the other. The crate's actual
+# floor is lower (`rust-version = "1.89"` in Cargo.toml); this is about the two
+# machines agreeing, not about the minimum supported.
+[toolchain]
+channel = "1.95.0"
+components = ["rustfmt", "clippy", "rust-analyzer"]

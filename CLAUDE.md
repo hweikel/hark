@@ -6,13 +6,22 @@ needs that isn't obvious from the code.
 
 ## Commands
 
+Linux (Nix):
+
 ```sh
-nix develop                                   # per-platform shell; Linux pulls webkitgtk
+nix develop                                   # rust, cargo-tauri, webkitgtk — all pinned
 cargo tauri dev                               # run the app, from the repo root
 cd src-tauri && cargo test                    # 103 tests
 cd src-tauri && cargo tauri build --no-bundle # release binary -> src-tauri/target/release/hark
 npm run build                                 # tsc --noEmit && vite build
 ./packaging/install-local.sh                  # put hark on PATH + in the launcher
+```
+
+macOS (rustup + npm, no Nix — see Track B):
+
+```sh
+npm install && npm run tauri dev
+cd src-tauri && cargo test
 ```
 
 The release binary embeds the frontend, so a frontend change needs
@@ -29,13 +38,13 @@ can start on B while A's transfers run.
 
 ### One repo, both machines — yes
 
-`main` serves both. Everything platform-specific is confined to `flake.nix`,
-which exposes a dev shell for `x86_64-linux`, `aarch64-darwin` and
-`x86_64-darwin`. The Rust and TypeScript are already portable — Tauri, cpal and
-symphonia all abstract the platform, and nothing is hand-gated by `#[cfg]`
-today. If that changes, use `#[cfg(target_os = "…")]` rather than branching the
-repo. `Cargo.lock` is shared and already resolves both platforms' dependency
-sets.
+`main` serves both, and the split is only in how each machine *gets a
+toolchain* — Linux through `flake.nix`, macOS through rustup and npm. The
+source is shared whole: Tauri, cpal and symphonia abstract the platform, and
+nothing is hand-gated by `#[cfg]` today. If that changes, use
+`#[cfg(target_os = "…")]` rather than branching the repo. `Cargo.lock`,
+`rust-toolchain.toml` and `package.json` are common to both, and `Cargo.lock`
+already resolves both platforms' dependency sets.
 
 Two things to expect, neither a problem:
 
@@ -128,45 +137,74 @@ before track B is started. Only step 3 needs the binary.
 
 ## Track B: making it build on macOS
 
-`flake.nix` now exposes `aarch64-darwin` and `x86_64-darwin` dev shells
-alongside Linux. **They evaluate, but they have never been built or run** —
-they were written on the Linux machine, which cannot test them. Treat the
-darwin branch as a starting point to iterate on, not as known-good.
+**Use rustup and the npm Tauri CLI. Do not install Nix for this.**
 
-What was done for you: the gtk/webkit/alsa stack is now `lib.optionals isLinux`,
-because macOS gets its webview from the system WKWebView and its audio from
-CoreAudio, neither of which nixpkgs vendors. The Linux-only env exports
-(`WEBKIT_DISABLE_DMABUF_RENDERER`, `GDK_BACKEND`, the gsettings paths) are
-likewise Linux-only now. The Linux shell was re-verified unchanged after the
-refactor: same env, 103 tests, release build.
+Nix earns its place on the Linux machine for one reason: pinning `webkitgtk`,
+which is a multi-hour source build if the pin ever slips. That reason does not
+exist on macOS, where Tauri uses the system WKWebView and cpal uses CoreAudio —
+nothing heavy to pin, and nothing nixpkgs can vendor anyway. Installing Nix on
+macOS is its own small project (APFS volume, daemon), and at the end of it you
+would be the first person ever to run the darwin shell in this flake. That is
+two unknowns stacked underneath a first-time build of an unfamiliar app.
 
-Prerequisites: Nix with flakes enabled, and Xcode command line tools
-(`xcode-select --install`) — the shell warns if they're missing.
+rustup plus `@tauri-apps/cli` is Tauri's own documented macOS path, so when
+something breaks the error text matches what everyone else has written about.
 
-Climb this ladder; each rung needs less of the platform than the next:
+### Setup
+
+```sh
+xcode-select --install          # WKWebView, CoreAudio, the linker
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+# node 24 via brew/fnm/asdf, whichever you prefer
+
+cd hark && npm install          # installs @tauri-apps/cli + the darwin binary
+npm run tauri dev               # the app
+```
+
+Two things in the repo exist so you don't have to decide:
+
+- **`rust-toolchain.toml`** pins 1.95.0, the same compiler the Linux flake
+  provides. rustup reads it and installs that version automatically. The
+  nixpkgs cargo on Linux ignores the file, so the two machines agree without
+  either one bending.
+- **`@tauri-apps/cli` is already in `devDependencies`** with `npm run tauri`
+  wired up, and `package-lock.json` already carries `cli-darwin-arm64`, so
+  `npm install` is all it takes. Linux is unaffected — it still uses
+  `cargo tauri` from nixpkgs. The two CLIs are 2.11.0 and 2.12.2 respectively;
+  both drive the `tauri = "2"` crate and the skew does not matter.
+
+### Verification ladder
+
+Each rung needs more of the platform than the one above, so failures localise:
 
 ```sh
 cd src-tauri && cargo test                     # 1. no GUI, no audio device
-cargo run --bin scan_report -- ~/music         # 2. library layer against real files
+cargo run --bin scan_report -- ~/music         # 2. library layer, real files
 cargo run --bin play_probe -- <album-dir> 4    # 3. CoreAudio output
-cd .. && cargo tauri dev                       # 4. the actual window
-cargo tauri build --no-bundle                  # 5. release binary
+cd .. && npm run tauri dev                     # 4. the actual window
+npm run tauri build -- --no-bundle             # 5. release binary
 ```
 
-Friction to expect, in rough order of likelihood:
+Get rung 1 green before touching anything else — it needs no window and no
+audio device, so it proves the library, tag and sync layers are fine and
+isolates whatever follows to the platform shell.
 
-- **`cargo-tauri` from the pinned nixpkgs revision** may not have a darwin
-  build on that exact rev. If it doesn't, the npm `@tauri-apps/cli` is the
-  fallback — it is deliberately *not* used on Linux, but using it on macOS only
-  is an acceptable split.
-- **Apple SDK framework linking** (WebKit, CoreAudio, AppKit). These come from
-  the Xcode tools, not nixpkgs. If the linker can't find them, the usual
-  escapes are the `apple-sdk` package or dropping to a rustup toolchain outside
-  the nix shell for the build step.
-- **Codesigning.** Stay on `--no-bundle` at first; it produces a plain binary
-  and sidesteps signing entirely. A `.app` bundle needs a signing identity.
-- **`cargo tauri build` is slow the first time** (~4 min on the ThinkPad) and
-  webkitgtk is *not* being built on macOS, so it should be faster, not slower.
+Friction to expect:
+
+- **Codesigning.** Stay on `--no-bundle` at first: a plain binary, no signing
+  identity needed. A `.app` bundle is a separate errand.
+- **Gatekeeper** may quarantine the built binary on first run.
+- **`src-tauri/gen/schemas/macos-schema.json`** will appear. Commit it.
+
+### If you would rather use Nix anyway
+
+`flake.nix` does expose `aarch64-darwin` and `x86_64-darwin` shells — the
+gtk/webkit/alsa stack and the Linux-only env exports sit behind
+`lib.optionals isLinux`. All three systems evaluate. But **the darwin shells
+have never been built or run**, since they were written on the Linux machine.
+The likely snags are `cargo-tauri` not having a darwin build on that exact
+pinned nixpkgs revision, and Apple SDK framework linking. It is a fine thing to
+fix later; it is a bad thing to fight on day one.
 
 Do not assume the audio findings transfer. The 48kHz-only conclusion below is a
 fact about *this ThinkPad's* `sof-hda-dsp` sink. The mac mini's hardware may
