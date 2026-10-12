@@ -1,0 +1,597 @@
+/* hark!
+   The whole point is the cover images. No shadows, no depth effects, nothing
+   that competes with artwork. Sections are separated by thin gold hairlines. */
+
+:root {
+  /* the ink of the night sky */
+  --ink: #0a0d16;
+  --ink-raised: #10141f;
+
+  /* restrained antique gold, not yellow */
+  --gold: #c9a227;
+  --gold-hairline: rgba(201, 162, 39, 0.28);
+  --gold-dim: rgba(201, 162, 39, 0.6);
+
+  --text: #e8e4da;
+  --text-muted: #857f71;
+
+  /* Perfect albums and playlists get the real estate; everything else is
+     present at a size that reads as secondary without being hidden. */
+  --tile-marquee: 180px;
+  --tile-lower: 116px;
+  --gap: 22px;
+  --pad: 26px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--ink);
+  color: var(--text);
+  font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12px;
+  overflow: hidden;
+  /* The grid is images; stop the whole window from being a drag source. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+:focus {
+  outline: none;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* ---- search ---------------------------------------------------------- */
+
+.searchbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 var(--pad);
+  height: 38px;
+  border-bottom: 1px solid var(--gold-hairline);
+}
+
+.searchbar input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  letter-spacing: 0.04em;
+  padding: 0;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.searchbar input::placeholder {
+  color: var(--text-muted);
+}
+
+.searchbar .count {
+  color: var(--text-muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+/* ---- now playing ------------------------------------------------------
+   Doesn't exist until something is played. After that it stays put, paused or
+   finished, and the grid scrolls underneath it. */
+
+#nowplaying {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: 148px minmax(180px, 280px) 1fr;
+  gap: 22px;
+  padding: 18px var(--pad);
+  border-bottom: 1px solid var(--gold-hairline);
+  max-height: 212px;
+}
+
+#nowplaying[hidden] {
+  display: none;
+}
+
+.np-cover {
+  width: 148px;
+  height: 148px;
+  background: var(--ink-raised);
+  overflow: hidden;
+}
+
+.np-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.np-cover.empty {
+  display: grid;
+  place-items: center;
+  padding: 10px;
+  border: 1px solid var(--gold-hairline);
+}
+
+.np-side {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.np-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.np-title,
+.np-artist {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.np-title {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.np-artist {
+  color: var(--text-muted);
+}
+
+.np-controls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.np-button {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.np-button:hover {
+  color: var(--text);
+}
+
+/* Shuffle is the only control with a persistent on/off state worth showing. */
+.np-button.on {
+  color: var(--gold);
+  border-color: var(--gold-hairline);
+}
+
+.np-tracks {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  min-width: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--gold-hairline) transparent;
+}
+
+.np-track {
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  gap: 10px;
+  padding: 2px 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  line-height: 1.6;
+}
+
+.np-track:hover {
+  color: var(--text);
+}
+
+.np-track.current {
+  color: var(--gold);
+}
+
+.np-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.np-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.np-time {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- grid ------------------------------------------------------------ */
+
+#grid {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--pad) var(--pad) 60px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--gold-hairline) transparent;
+}
+
+.zone {
+  display: grid;
+  gap: var(--gap);
+  grid-template-columns: repeat(auto-fill, minmax(var(--tile-marquee), 1fr));
+  align-items: start;
+}
+
+/* The demoted zone: still browsable, visibly not the marquee. */
+.zone-rest {
+  grid-template-columns: repeat(auto-fill, minmax(var(--tile-lower), 1fr));
+  gap: 16px;
+}
+
+.hairline {
+  height: 1px;
+  background: var(--gold-hairline);
+  margin: calc(var(--pad) + 6px) 0 var(--pad);
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  cursor: pointer;
+  /* The gold outline sits in this padding when the tile is active. */
+  padding: 5px;
+  border-radius: 1px;
+}
+
+.tile.active {
+  outline: 1px solid var(--gold);
+  outline-offset: 0;
+}
+
+.cover {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: var(--ink-raised);
+  overflow: hidden;
+}
+
+.cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Albums with no art at all — 41 of them — get a readable tile, not a broken
+   image icon. */
+.cover.empty {
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  border: 1px solid var(--gold-hairline);
+}
+
+.cover-text {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+}
+
+.label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.label-title,
+.label-artist {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.label-title {
+  color: var(--text);
+}
+
+.label-artist {
+  color: var(--text-muted);
+}
+
+.zone-rest .label-title,
+.zone-rest .label-artist {
+  font-size: 10px;
+}
+
+.empty-result {
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+  padding: 40px 0;
+}
+
+/* ---- playlist picker (the `a` overlay) -------------------------------- */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 13, 22, 0.82);
+  display: grid;
+  place-items: start center;
+  padding-top: 14vh;
+  z-index: 10;
+}
+
+.picker {
+  width: min(460px, 86vw);
+  background: var(--ink);
+  border: 1px solid var(--gold-hairline);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.picker-heading {
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+.picker-input {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--gold-hairline);
+  color: var(--text);
+  font: inherit;
+  padding: 4px 0;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 44vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--gold-hairline) transparent;
+}
+
+.picker-item {
+  padding: 5px 8px;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.picker-item:hover,
+.picker-item.on {
+  color: var(--gold);
+}
+
+.picker-new {
+  font-style: italic;
+}
+
+.picker-status {
+  color: var(--text-muted);
+  min-height: 1.3em;
+}
+
+/* ---- edit modal (the `e` overlay) ------------------------------------- */
+
+.modal {
+  width: min(620px, 90vw);
+  max-height: 76vh;
+  background: var(--ink);
+  border: 1px solid var(--gold-hairline);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--gold-hairline) transparent;
+}
+
+.modal-heading {
+  color: var(--gold);
+  letter-spacing: 0.04em;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--gold-hairline);
+}
+
+.modal-field {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  align-items: center;
+  gap: 12px;
+}
+
+.modal-field > span {
+  color: var(--text-muted);
+}
+
+.modal input:not([type="checkbox"]) {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--gold-hairline);
+  color: var(--text);
+  font: inherit;
+  padding: 4px 0;
+  min-width: 0;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.modal input:not([type="checkbox"]):focus {
+  border-bottom-color: var(--gold);
+}
+
+.modal-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.modal-check input {
+  accent-color: var(--gold);
+}
+
+/* The rename preview: quiet when nothing moves, gold when a folder will. */
+.modal-rename {
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 6px 0;
+  border-top: 1px solid var(--gold-hairline);
+  border-bottom: 1px solid var(--gold-hairline);
+}
+
+.modal-rename.moving {
+  color: var(--gold);
+}
+
+.modal-tracks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 34vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--gold-hairline) transparent;
+}
+
+.modal-track {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 10px;
+}
+
+.modal-track-no {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.modal-status {
+  color: var(--text-muted);
+  min-height: 1.3em;
+  line-height: 1.5;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.modal-actions button {
+  background: transparent;
+  border: 1px solid var(--gold-hairline);
+  color: var(--gold);
+  font: inherit;
+  padding: 5px 16px;
+  cursor: pointer;
+}
+
+.modal-actions button:hover:not(:disabled) {
+  border-color: var(--gold);
+}
+
+.modal-actions button:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+/* ---- first run: no music directory ----------------------------------- */
+
+.setup {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: var(--pad);
+}
+
+.setup-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 460px;
+  width: 100%;
+}
+
+.setup h1 {
+  color: var(--gold);
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: 0.06em;
+}
+
+.setup p {
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.6;
+}
+
+.setup form {
+  display: flex;
+  gap: 10px;
+  border-bottom: 1px solid var(--gold-hairline);
+  padding-bottom: 8px;
+}
+
+.setup input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.setup button {
+  background: transparent;
+  border: 1px solid var(--gold-hairline);
+  color: var(--gold);
+  font: inherit;
+  padding: 4px 14px;
+  cursor: pointer;
+}
+
+.setup button:hover {
+  border-color: var(--gold);
+}

@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=hark!
+GenericName=Music Player
+Comment=A music player that respects perfect albums
+# Resolved from PATH so this entry works for both the dev-shell binary and a
+# later Nix-packaged one without being rewritten.
+Exec=hark
+Icon=hark
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=music;album;playlist;flac;mp3;
+# Matches the WM_CLASS the window actually reports, so i3 rules and rofi's
+# window mode can both find it.
+StartupWMClass=Hark

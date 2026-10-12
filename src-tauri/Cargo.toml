@@ -1,0 +1,39 @@
+[package]
+name = "hark"
+version = "0.1.0"
+description = "A music player that respects perfect albums"
+edition = "2021"
+# The nix dev shell pins rustc 1.95; no reason to hold deps back to an older MSRV.
+rust-version = "1.89"
+# `scan_report` is a verification tool, not the app. Without this, `cargo run`
+# (and so `cargo tauri dev`) can't tell which binary is meant.
+default-run = "hark"
+
+[lib]
+name = "hark_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+lofty = "0.25"
+rayon = "1.12"
+walkdir = "2.5.0"
+unicode-normalization = "0.1.25"
+anyhow = "1.0.104"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
+cpal = "0.18.2"
+ringbuf = "0.5.3"
+rand = "0.10.3"
+symphonia = { version = "0.6.1", features = ["mp3", "flac", "aac", "alac", "isomp4", "ogg", "vorbis", "wav", "pcm"] }
+
+[profile.dev]
+# Dependencies get optimized even in dev: decoding 212 JPEGs and running a FLAC
+# decoder in a debug build is unusably slow otherwise.
+opt-level = 0
+[profile.dev.package."*"]
+opt-level = 2
