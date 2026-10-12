@@ -70,6 +70,16 @@ impl Player {
         let _ = self.commands.send(command);
     }
 
+    /// Follow a tile whose id changed underneath playback — a renamed
+    /// playlist — so the now-playing row doesn't lose it.
+    pub fn rename_tile(&self, from: &str, to: &str) {
+        if let Ok(mut state) = self.state.lock() {
+            if state.tile_id.as_deref() == Some(from) {
+                state.tile_id = Some(to.to_string());
+            }
+        }
+    }
+
     pub fn state(&self) -> PlaybackState {
         self.state.lock().map(|s| s.clone()).unwrap_or_default()
     }

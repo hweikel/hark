@@ -40,7 +40,7 @@ hark normalize [--check]     rewrite folder names into Unicode NFC
 hark --help
 ```
 
-**Keys** — `space` play/pause · `e` edit the active album · `a` add that album
+**Keys** — `space` play/pause · `e` edit the active album or playlist · `a` add that album
 or playlist to a playlist · `A` add the song currently playing · arrows move,
 `Enter` plays · `/` focuses search, `Esc` clears it. Double-click a tile to
 play it. Quit with your window manager (`$mod+Shift+q`).

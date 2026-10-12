@@ -88,6 +88,7 @@ fn run_gui(root: PathBuf) {
             app::playback_state,
             app::playlist_add,
             app::playlist_names,
+            app::save_playlist,
             app::save_album,
             app::planned_rename,
         ])

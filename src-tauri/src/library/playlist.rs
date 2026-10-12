@@ -22,6 +22,9 @@ use super::store::PLAYLISTS_DIR;
 
 const EXTENSION: &str = "m3u8";
 
+/// Cover formats a playlist can carry next to it, in lookup order.
+const ART_EXTENSIONS: [&str; 4] = ["jpg", "jpeg", "png", "webp"];
+
 #[derive(Debug, Clone)]
 pub struct Playlist {
     /// Display name — the filename without its extension.
@@ -119,7 +122,7 @@ pub fn load(path: &Path) -> Result<Playlist> {
 }
 
 fn find_playlist_art(dir: &Path, name: &str) -> Option<PathBuf> {
-    for ext in ["jpg", "jpeg", "png", "webp"] {
+    for ext in ART_EXTENSIONS {
         let candidate = dir.join(format!("{name}.{ext}"));
         if candidate.is_file() {
             return Some(candidate);
@@ -132,24 +135,160 @@ fn find_playlist_art(dir: &Path, name: &str) -> Option<PathBuf> {
 pub fn save(root: &Path, playlist: &Playlist) -> Result<()> {
     let dir = playlists_dir(root);
     fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    write_replacing(&playlist.path, &render(&dir, playlist), None)
+}
 
+fn render(dir: &Path, playlist: &Playlist) -> String {
     let mut text = String::from("#EXTM3U\n");
     for entry in &playlist.entries {
-        text.push_str(&relative_to(&dir, entry));
+        text.push_str(&relative_to(dir, entry));
         text.push('\n');
     }
     for raw in &playlist.unresolved {
         text.push_str(raw);
         text.push('\n');
     }
+    text
+}
 
-    // Written atomically: a half-written playlist would lose the references
-    // that are the playlist's entire content.
-    let tmp = playlist.path.with_extension("m3u8.tmp");
-    fs::write(&tmp, text.as_bytes())
-        .with_context(|| format!("writing {}", tmp.display()))?;
-    fs::rename(&tmp, &playlist.path)
-        .with_context(|| format!("replacing {}", playlist.path.display()))?;
+/// Write `text` to `target` atomically: a half-written playlist would lose the
+/// references that are the playlist's entire content.
+///
+/// With `replacing`, the old file is removed only once the new content is
+/// safely on disk. Removing it *before* the final rename, rather than after, is
+/// what makes a case-only rename work on a case-insensitive filesystem, where
+/// `Tilden.m3u8` and `tilden.m3u8` are one file and deleting "the old one"
+/// afterwards would delete the new one.
+fn write_replacing(target: &Path, text: &str, replacing: Option<&Path>) -> Result<()> {
+    let tmp = target.with_extension("m3u8.tmp");
+    fs::write(&tmp, text.as_bytes()).with_context(|| format!("writing {}", tmp.display()))?;
+    if let Some(old) = replacing.filter(|old| *old != target) {
+        fs::remove_file(old).with_context(|| format!("removing {}", old.display()))?;
+    }
+    fs::rename(&tmp, target).with_context(|| format!("replacing {}", target.display()))?;
+    Ok(())
+}
+
+/// What to do with a playlist's custom cover when it is edited.
+#[derive(Debug, Clone)]
+pub enum CoverChange {
+    Keep,
+    /// Copy this image in as the cover.
+    Set(PathBuf),
+    /// Remove the custom cover, going back to the 2×2 mosaic.
+    Clear,
+}
+
+/// Find a playlist by its display name.
+pub fn find(root: &Path, name: &str) -> Option<Playlist> {
+    load_all(root).into_iter().find(|p| p.name == name)
+}
+
+/// Apply an edit from the `e` modal: rename, reorder or remove entries, and
+/// change the cover. Returns the playlist's name afterwards.
+///
+/// `entries` is the new list in order. It may only drop or reorder what the
+/// playlist already holds — this is an editor, not a back door for adding
+/// arbitrary files. Unresolved entries (music not on this machine right now)
+/// are kept untouched, for the same reason `add_tracks` keeps them.
+pub fn update(
+    root: &Path,
+    current_name: &str,
+    new_name: &str,
+    entries: &[PathBuf],
+    cover: CoverChange,
+) -> Result<String> {
+    let existing = find(root, current_name)
+        .ok_or_else(|| anyhow!("no playlist named {current_name}"))?;
+
+    let name = sanitize_filename(new_name);
+    if name.is_empty() {
+        return Err(anyhow!("a playlist needs a name"));
+    }
+
+    let mut resolved = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let entry = entry.canonicalize().unwrap_or_else(|_| entry.clone());
+        if !existing.entries.contains(&entry) {
+            return Err(anyhow!("{} is not on this playlist", entry.display()));
+        }
+        resolved.push(entry);
+    }
+
+    let dir = playlists_dir(root);
+    let path = dir.join(format!("{name}.{EXTENSION}"));
+    if path != existing.path && path.exists() && !same_file(&path, &existing.path) {
+        return Err(anyhow!("a playlist named {name} already exists"));
+    }
+
+    let updated = Playlist {
+        name: name.clone(),
+        path: path.clone(),
+        entries: resolved,
+        unresolved: existing.unresolved.clone(),
+        art: None,
+    };
+    write_replacing(&path, &render(&dir, &updated), Some(&existing.path))?;
+
+    match cover {
+        CoverChange::Keep => {
+            if let Some(old) = &existing.art {
+                let ext = extension_of(old);
+                move_file(old, &dir.join(format!("{name}.{ext}")))?;
+            }
+        }
+        CoverChange::Clear => {
+            if let Some(old) = &existing.art {
+                fs::remove_file(old).with_context(|| format!("removing {}", old.display()))?;
+            }
+        }
+        CoverChange::Set(source) => {
+            let ext = extension_of(&source);
+            if !ART_EXTENSIONS.contains(&ext.as_str()) {
+                return Err(anyhow!("a cover must be a jpg, png or webp image"));
+            }
+            if !source.is_file() {
+                return Err(anyhow!("no image at {}", source.display()));
+            }
+            let target = dir.join(format!("{name}.{ext}"));
+            let tmp = dir.join(format!(".{name}.cover.tmp"));
+            fs::copy(&source, &tmp).with_context(|| format!("copying {}", source.display()))?;
+            if let Some(old) = &existing.art {
+                fs::remove_file(old).with_context(|| format!("removing {}", old.display()))?;
+            }
+            fs::rename(&tmp, &target).with_context(|| format!("placing {}", target.display()))?;
+        }
+    }
+
+    Ok(name)
+}
+
+fn extension_of(path: &Path) -> String {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+}
+
+/// Whether two paths are one file — true for `Tilden.m3u8` and `tilden.m3u8`
+/// on a case-insensitive filesystem.
+fn same_file(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (fs::metadata(a), fs::metadata(b)) {
+        (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
+        _ => false,
+    }
+}
+
+/// Rename a file, going via a temporary name when source and target are the
+/// same file under two spellings (a case-only rename on APFS).
+fn move_file(from: &Path, to: &Path) -> Result<()> {
+    if from == to {
+        return Ok(());
+    }
+    let via = to.with_extension("cover.tmp");
+    fs::rename(from, &via).with_context(|| format!("moving {}", from.display()))?;
+    fs::rename(&via, to).with_context(|| format!("moving into {}", to.display()))?;
     Ok(())
 }
 
@@ -378,6 +517,105 @@ mod tests {
 
         let loaded = load(&path_for(&root, "Mix")).unwrap();
         assert!(loaded.art.is_some());
+    }
+
+    fn names(root: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(playlists_dir(root))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn three_track_playlist(name: &str) -> (PathBuf, Vec<PathBuf>) {
+        let root = fixture(name);
+        let tracks: Vec<PathBuf> = ["a", "b", "c"]
+            .iter()
+            .map(|t| {
+                let path = root.join(format!("Artist/Album/{t}.flac"));
+                touch(&path);
+                path.canonicalize().unwrap()
+            })
+            .collect();
+        add_tracks(&root, "Mix", &tracks).unwrap();
+        (root, tracks)
+    }
+
+    #[test]
+    fn update_reorders_and_removes_entries() {
+        let (root, t) = three_track_playlist("update-order");
+        update(&root, "Mix", "Mix", &[t[2].clone(), t[0].clone()], CoverChange::Keep).unwrap();
+        let mix = find(&root, "Mix").unwrap();
+        assert_eq!(mix.entries, vec![t[2].clone(), t[0].clone()]);
+    }
+
+    #[test]
+    fn update_refuses_entries_that_were_not_on_the_playlist() {
+        let (root, t) = three_track_playlist("update-foreign");
+        let stranger = root.join("Other/Album/x.flac");
+        touch(&stranger);
+        assert!(update(&root, "Mix", "Mix", &[t[0].clone(), stranger], CoverChange::Keep).is_err());
+        assert_eq!(find(&root, "Mix").unwrap().entries.len(), 3, "a refused edit changes nothing");
+    }
+
+    #[test]
+    fn update_keeps_unresolved_entries() {
+        let (root, t) = three_track_playlist("update-unresolved");
+        let path = path_for(&root, "Mix");
+        let text = fs::read_to_string(&path).unwrap() + "../Gone/Album/missing.flac\n";
+        fs::write(&path, text).unwrap();
+        update(&root, "Mix", "Mix", &[t[1].clone()], CoverChange::Keep).unwrap();
+        assert_eq!(find(&root, "Mix").unwrap().unresolved, vec!["../Gone/Album/missing.flac"]);
+    }
+
+    #[test]
+    fn renaming_moves_the_file_and_its_cover() {
+        let (root, t) = three_track_playlist("update-rename");
+        fs::write(playlists_dir(&root).join("Mix.jpg"), b"img").unwrap();
+        let name = update(&root, "Mix", "Night: Drive?", &t, CoverChange::Keep).unwrap();
+        assert_eq!(name, "Night_ Drive");
+        assert_eq!(names(&root), vec!["Night_ Drive.jpg", "Night_ Drive.m3u8"]);
+    }
+
+    #[test]
+    fn a_case_only_rename_keeps_the_playlist() {
+        let (root, t) = three_track_playlist("update-case");
+        update(&root, "Mix", "MIX", &t, CoverChange::Keep).unwrap();
+        assert_eq!(names(&root), vec!["MIX.m3u8"]);
+        assert_eq!(find(&root, "MIX").unwrap().entries.len(), 3);
+    }
+
+    #[test]
+    fn renaming_onto_another_playlist_is_refused() {
+        let (root, t) = three_track_playlist("update-collide");
+        add_tracks(&root, "Other", &t[..1]).unwrap();
+        assert!(update(&root, "Mix", "Other", &t, CoverChange::Keep).is_err());
+        assert_eq!(find(&root, "Other").unwrap().entries.len(), 1);
+        assert_eq!(find(&root, "Mix").unwrap().entries.len(), 3);
+    }
+
+    #[test]
+    fn setting_and_clearing_a_cover() {
+        let (root, t) = three_track_playlist("update-cover");
+        let image = root.join("cover.PNG");
+        fs::write(&image, b"png").unwrap();
+
+        update(&root, "Mix", "Mix", &t, CoverChange::Set(image)).unwrap();
+        assert_eq!(names(&root), vec!["Mix.m3u8", "Mix.png"]);
+        assert!(find(&root, "Mix").unwrap().art.is_some());
+
+        update(&root, "Mix", "Mix", &t, CoverChange::Clear).unwrap();
+        assert_eq!(names(&root), vec!["Mix.m3u8"]);
+    }
+
+    #[test]
+    fn a_cover_that_is_not_an_image_is_refused() {
+        let (root, t) = three_track_playlist("update-badcover");
+        let text = root.join("notes.txt");
+        fs::write(&text, b"hi").unwrap();
+        assert!(update(&root, "Mix", "Mix", &t, CoverChange::Set(text)).is_err());
     }
 
     #[test]

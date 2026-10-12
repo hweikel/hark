@@ -23,6 +23,15 @@ export const playlistNames = () => invoke<string[]>("playlist_names");
 export const playlistAdd = (name: string, tileId: string, trackIndex: number | null) =>
   invoke<number>("playlist_add", { name, tileId, trackIndex });
 
+/** Returns the playlist's tile id afterwards, which changes with its name. */
+export const savePlaylist = (
+  id: string,
+  name: string,
+  tracks: string[],
+  coverPath: string | null,
+  clearCover: boolean,
+) => invoke<string>("save_playlist", { id, name, tracks, coverPath, clearCover });
+
 export const playTile = (id: string, start: number) =>
   invoke<void>("play_tile", { id, start });
 

@@ -34,6 +34,11 @@ const COVER_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp"];
 const SINGLES_PREFIX: &str = "singles\u{1f}";
 const PLAYLIST_PREFIX: &str = "playlist\u{1f}";
 
+/// The tile id a playlist of this name gets.
+pub fn playlist_id(name: &str) -> String {
+    format!("{PLAYLIST_PREFIX}{name}")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AlbumKind {
@@ -217,7 +222,7 @@ fn build_playlists(root: &Path, albums: &[Album]) -> Vec<Album> {
 
             let count = tracks.len();
             Album {
-                id: format!("{PLAYLIST_PREFIX}{}", playlist.name),
+                id: playlist_id(&playlist.name),
                 kind: AlbumKind::Playlist,
                 rel_path: None,
                 artist_sort: String::new(),

@@ -277,6 +277,47 @@ pub fn playlist_add(
     Ok(added)
 }
 
+/// Save the playlist `e` modal: name, entry order and removals, and cover.
+///
+/// `tracks` is the playlist's new contents in order, as absolute paths taken
+/// from the tile. `cover_path` sets a custom cover; `clear_cover` drops it and
+/// brings back the mosaic. Returns the tile id afterwards, which changes with
+/// the name.
+#[tauri::command]
+pub fn save_playlist(
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+    tracks: Vec<String>,
+    cover_path: Option<String>,
+    clear_cover: bool,
+) -> Result<String, String> {
+    let (root, current) = {
+        let library = state.library.read().map_err(|_| "library lock poisoned")?;
+        let tile = library
+            .albums
+            .iter()
+            .find(|a| a.id == id && a.kind == AlbumKind::Playlist)
+            .ok_or_else(|| format!("no playlist with id {id}"))?;
+        (library.root.clone(), tile.title.clone())
+    };
+
+    let cover = match cover_path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        Some(source) => playlist::CoverChange::Set(PathBuf::from(source)),
+        None if clear_cover => playlist::CoverChange::Clear,
+        None => playlist::CoverChange::Keep,
+    };
+    let entries: Vec<PathBuf> = tracks.iter().map(PathBuf::from).collect();
+
+    let saved = playlist::update(&root, &current, &name, &entries, cover)
+        .map_err(|e| format!("{e:#}"))?;
+
+    let new_id = scan::playlist_id(&saved);
+    state.player.rename_tile(&id, &new_id);
+    state.reload(&root);
+    Ok(new_id)
+}
+
 /// Names of existing playlists, for the `a` picker.
 #[tauri::command]
 pub fn playlist_names(state: State<'_, AppState>) -> Vec<String> {

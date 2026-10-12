@@ -539,6 +539,67 @@ body {
   cursor: default;
 }
 
+/* ---- playlist edit modal ------------------------------------------- */
+
+.playlist-cover {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.playlist-cover-preview {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border: 1px solid var(--gold-hairline);
+}
+
+.playlist-cover-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.playlist-track {
+  display: grid;
+  grid-template-columns: 28px 1fr auto auto auto;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 0;
+}
+
+.playlist-track-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.playlist-track.removed .playlist-track-name,
+.playlist-track.removed .np-num {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.playlist-track-button {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  font: inherit;
+  line-height: 1;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+
+.playlist-track-button:hover:not(:disabled) {
+  color: var(--gold);
+  border-color: var(--gold-hairline);
+}
+
+.playlist-track-button:disabled {
+  visibility: hidden;
+}
+
 /* ---- first run: no music directory ----------------------------------- */
 
 .setup {

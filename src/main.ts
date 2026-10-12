@@ -3,6 +3,7 @@ import { getLibrary, playTile, playbackState, playbackToggle, rescan } from "./a
 import { Grid } from "./grid";
 import { NowPlaying } from "./nowplaying";
 import { EditModal } from "./modal";
+import { PlaylistModal } from "./playlistmodal";
 import { PlaylistPicker } from "./picker";
 import type { LibraryView, PlaybackState, Tile } from "./types";
 
@@ -17,6 +18,7 @@ let playback: PlaybackState | null = null;
 let generation = 0;
 const picker = new PlaylistPicker();
 const modal = new EditModal();
+const playlistModal = new PlaylistModal();
 
 async function boot() {
   // Playback state changes originate in the audio thread — a track ending is
@@ -176,12 +178,14 @@ async function refreshLibrary() {
   grid?.setTiles(library.tiles, generation);
   const gridRoot = document.querySelector<HTMLElement>("#grid");
   if (gridRoot) updateCount(gridRoot, library.tiles.length);
+  // An edit can change the playing tile's id (a renamed playlist).
+  playback = await playbackState();
   paintNowPlaying();
 }
 
 document.addEventListener("keydown", (event) => {
   // While an overlay is open it owns the keyboard entirely.
-  if (picker.isOpen || modal.isOpen) return;
+  if (picker.isOpen || modal.isOpen || playlistModal.isOpen) return;
 
   const typingInSearch = document.activeElement === searchInput;
 
@@ -221,8 +225,11 @@ document.addEventListener("keydown", (event) => {
 
   if (event.key === "e") {
     const active = grid?.active;
-    // Singles piles and playlists have no album folder to rename or tag.
-    if (active && active.relPath !== null) {
+    if (active?.kind === "playlist") {
+      event.preventDefault();
+      playlistModal.open(active, generation, () => void refreshLibrary());
+    } else if (active && active.relPath !== null) {
+      // Singles piles have no album folder to rename or tag.
       event.preventDefault();
       modal.open(active, () => void refreshLibrary());
     }
