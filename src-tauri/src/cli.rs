@@ -26,7 +26,7 @@ pub const HELP: &str = "\
 hark! — a music player that respects perfect albums
 
 usage:
-  hark [PATH]                  open the collection (default: $HARK_MUSIC_DIR, else ~/music)
+  hark [PATH]                  open the collection (default: $HARK_MUSIC_DIR, else ~/music; ~/music-hark on macOS)
   hark sync [--check|--init]   reconcile the collection with the remote
   hark normalize [--check]     rewrite folder names into Unicode NFC
   hark --help

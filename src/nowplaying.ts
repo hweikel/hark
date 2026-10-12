@@ -2,20 +2,22 @@ import { artUrl, playbackNext, playbackPlayIndex, playbackPrevious, playbackSetS
 import type { PlaybackState, Tile } from "./types";
 
 /**
- * Transport glyphs, from the Font Awesome range of JetBrains Mono Nerd Font
- * (already installed system-wide via `fonts.packages`).
+ * Transport icons, as inline SVG drawn in `currentColor`.
  *
- * Plain Unicode was the obvious first choice and the wrong one: this font has
- * no glyph for ⇋, ⇄, ⏸, ⏭ or any of the usual media symbols, so they fell
- * through to whatever fallback the webview could find and rendered as specks.
- * These five are verified present.
+ * Two font-based attempts failed before this. Plain Unicode (⏸, ⏭, ⇄) has no
+ * glyph in JetBrains Mono and fell through to specks. Nerd Font codepoints
+ * (U+F04B and friends) worked on the Linux machine, which installs the patched
+ * font system-wide, but rendered as missing-glyph boxes on the mac, which has
+ * plain JetBrains Mono. SVG depends on no installed font at all.
  */
 const ICON = {
-  previous: "\u{f048}",
-  play: "\u{f04b}",
-  pause: "\u{f04c}",
-  next: "\u{f051}",
-  shuffle: "\u{f074}",
+  previous: '<path d="M3 2h2v12H3zM6 8l7-6v12z"/>',
+  play: '<path d="M4 2l10 6-10 6z"/>',
+  pause: '<path d="M3 2h4v12H3zM9 2h4v12H9z"/>',
+  next: '<path d="M11 2h2v12h-2zM10 8L3 14V2z"/>',
+  shuffle:
+    '<path d="M1 4h3l6 8h3M1 12h3l2-2.7M10 4h3M8.5 6L10 4" fill="none" stroke="currentColor" stroke-width="1.5"/>' +
+    '<path d="M12 1.5l3 2.5-3 2.5zM12 9.5l3 2.5-3 2.5z"/>',
 } as const;
 
 /**
@@ -144,7 +146,7 @@ export class NowPlaying {
 }
 
 function button(
-  glyph: string,
+  icon: string,
   label: string,
   onClick: () => void,
   active = false,
@@ -152,7 +154,7 @@ function button(
   const element = document.createElement("button");
   element.className = "np-button";
   element.classList.toggle("on", active);
-  element.textContent = glyph;
+  element.innerHTML = `<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true">${icon}</svg>`;
   element.title = label;
   element.addEventListener("click", onClick);
   return element;

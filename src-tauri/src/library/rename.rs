@@ -102,6 +102,7 @@ pub fn rename_album(
     // An artist folder left behind with nothing in it is clutter that would
     // show up as an empty artist on the next scan.
     prune_empty_parent(root, &from_path);
+    respell_sole_parent(root, &to_path)?;
 
     // Guard 5, and the flag re-key, in the same operation as the move.
     journal::append(root, &from_rel, &to_rel)?;
@@ -194,6 +195,51 @@ fn prune_empty_parent(root: &Path, moved_from: &Path) {
         let _ = fs::remove_file(path);
     }
     let _ = fs::remove_dir(parent);
+}
+
+/// Give the artist folder its NFC spelling on a normalization-insensitive
+/// filesystem (APFS).
+///
+/// On Linux, moving `Bjo◌̈rk/Debut` to `Björk/Debut` creates a fresh NFC
+/// `Björk` and `prune_empty_parent` removes the old one. On APFS the two names
+/// are the same directory, so `create_dir_all` reuses the decomposed folder and
+/// the album lands straight back inside it. Respelling it via a temp name gives
+/// the same end state as Linux. Only done when the moved album is the folder's
+/// sole occupant — the case where Linux would have pruned the old spelling —
+/// so no other album's path changes without a journal entry.
+fn respell_sole_parent(root: &Path, to_path: &Path) -> Result<()> {
+    let (Some(parent), Some(album)) = (to_path.parent(), to_path.file_name()) else {
+        return Ok(());
+    };
+    let (Some(grand), Some(wanted)) = (parent.parent(), parent.file_name()) else {
+        return Ok(());
+    };
+    if parent == root {
+        return Ok(());
+    }
+    let Some(wanted) = wanted.to_str() else {
+        return Ok(());
+    };
+
+    let Some(on_disk) = fs::read_dir(grand)?
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name())
+        .find(|n| n.to_str().map(nfc).as_deref() == Some(wanted))
+    else {
+        return Ok(());
+    };
+    if on_disk == wanted {
+        return Ok(());
+    }
+
+    let sole = fs::read_dir(parent)?.filter_map(|e| e.ok()).all(|e| {
+        let name = e.file_name();
+        name == album || is_junk(&name.to_string_lossy())
+    });
+    if sole {
+        rename_via_temp(&grand.join(&on_disk), parent)?;
+    }
+    Ok(())
 }
 
 /// Rewrite every artist/album folder name into NFC.
@@ -510,10 +556,14 @@ mod tests {
 
         let real_dir = root.join(decomposed).join("Debut");
         assert!(real_dir.is_dir());
-        assert!(
-            !root.join("Bj\u{00f6}rk/Debut").exists(),
-            "precomposed path must not exist, or the test proves nothing"
-        );
+        // APFS resolves either spelling to the same folder, so there the
+        // precondition cannot hold; the rename must still succeed.
+        if !cfg!(target_os = "macos") {
+            assert!(
+                !root.join("Bj\u{00f6}rk/Debut").exists(),
+                "precomposed path must not exist, or the test proves nothing"
+            );
+        }
 
         let outcome = rename_album(
             &root,

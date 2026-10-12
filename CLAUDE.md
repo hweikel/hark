@@ -22,6 +22,7 @@ macOS (rustup + npm, no Nix — see Track B):
 ```sh
 npm install && npm run tauri dev
 cd src-tauri && cargo test
+npm run tauri build                           # hark.app, then install it — see "Installing on macOS"
 ```
 
 The release binary embeds the frontend, so a frontend change needs
@@ -35,6 +36,26 @@ reflects it.
 Two independent tracks. **Track A (data) is the one with a trap in it**; track B
 (build) is just unfinished work. They don't depend on each other, so an agent
 can start on B while A's transfers run.
+
+**Status, 2026-10-12: both tracks are done on the mac mini.** What it took,
+beyond what is written below:
+
+- **The collection lives at `~/music-hark`, not `~/music`.** APFS is
+  case-insensitive, so `~/music` *is* `~/Music` — the Music app's library. The
+  runbook as written would have uploaded that library to B2 and then
+  `rclone sync` would have tried to mirror B2 over it. hark now defaults to
+  `~/music-hark` on macOS (`library::resolve_music_dir`). The mac's divergent
+  copy had been sitting in `~/music_backup` (Doppler's library folder) and was
+  renamed into place.
+- **There is no `b2-music` remote in the mac's rclone.conf** — just
+  `b2-innercasmalia`, which there already has `hard_delete = false`. A
+  `b2-music` alias pointing at it was added so the default remote resolves.
+- **The journalled renames were replayed locally before step 1** (see the
+  note under step 1 — without that, step 1 itself re-uploads the old names).
+- Only 16 files were genuinely mac-only (BIALYSTOCKS, two Le Petit Chou
+  albums, one Unknown Artist track) and went up in step 1. Step 2 then pulled
+  864 re-tagged files plus 36 new ones (9.3 GiB); none of the replaced local
+  copies was newer than B2's. `rclone check` afterwards: 0 differences.
 
 ### One repo, both machines — yes
 
@@ -121,8 +142,17 @@ Afterwards the watermark is set and ordinary `hark sync` on either machine is
 safe — bisync's steady state is what it is good at. The hazard is specific to
 onboarding a machine with a divergent copy.
 
-Two notes:
+Three notes:
 
+- **Step 1 has the same old-names trap as a naive `--init`.** `--ignore-existing`
+  protects files that are on B2 *at the same path* — but a folder the journal
+  renamed (`Mount Kimbie/The Sunset Violent` → `King Krule/…`,
+  `In Focus?` → `In Focus`) is not at the same path, so step 1 would upload it
+  under its old name and recreate the duplicate. On the mac mini that was 35 of
+  the 51 files step 1 wanted to push. Replay the journal locally first (plain
+  `mv` for real renames; for NFC-only ones on APFS, rename through a temp name,
+  since a direct rename between two normalizations of one name is a no-op), and
+  read step 1's dry-run against `.hark/renames.jsonl`.
 - Step 2 re-downloads the renamed albums, because `rclone sync` cannot know a
   folder moved — it deletes and re-fetches (~2GB). Replaying the journalled
   renames locally first would make those free `mv`s, but there is no
@@ -194,7 +224,71 @@ Friction to expect:
 - **Codesigning.** Stay on `--no-bundle` at first: a plain binary, no signing
   identity needed. A `.app` bundle is a separate errand.
 - **Gatekeeper** may quarantine the built binary on first run.
-- **`src-tauri/gen/schemas/macos-schema.json`** will appear. Commit it.
+- **`src-tauri/gen/schemas/macOS-schema.json`** will appear. Commit it.
+
+What actually happened on the mac mini (macOS 15.6, M-series, rustup 1.95.0,
+npm 11): every rung passed. Rung 1 initially failed 4 of 103, all real
+platform differences, now fixed:
+
+- APFS is normalization-insensitive, so moving `Bjo◌̈rk/Debut` to `Björk/Debut`
+  reused the decomposed artist folder instead of creating an NFC one.
+  `rename::respell_sole_parent` respells it via a temp name.
+- macOS's temp dir is behind a symlink (`/var` → `/private/var`); playlist
+  entries are canonicalized but the root was not, so `relative_to` wrote
+  absolute paths. It now canonicalizes both.
+- One test's precondition ("the NFC path must not exist") cannot hold on APFS
+  and is skipped there.
+
+**Do not commit `package-lock.json` churn from the mac.** npm 11 there strips
+the `libc` fields from the Linux optional deps; the Linux side needs them.
+`git checkout package-lock.json` after `npm install`.
+
+### Installing on macOS
+
+hark runs as a normal app from `/Applications/hark.app` — Spotlight,
+Launchpad, Dock. Updating it after a code change is a rebuild plus a copy:
+
+```sh
+cd ~/hark && git checkout package-lock.json   # if npm install touched it
+npm run tauri build
+rm -rf /Applications/hark.app
+ditto src-tauri/target/release/bundle/macos/hark.app /Applications/hark.app
+```
+
+Quit the running hark first, or the old binary keeps running until you do.
+The release binary embeds the frontend, so this is needed for UI changes too;
+`npm run tauri dev` is the loop for iterating, this is for installing.
+
+What makes the bundle, all macOS-only so Linux is untouched:
+
+- **`src-tauri/tauri.macos.conf.json`** — Tauri merges it over
+  `tauri.conf.json` only when building on macOS (a JSON merge patch, so its
+  `targets` and `icon` arrays *replace* the base ones). It swaps the Linux
+  `deb` target for `app`, points at the mac icon, and sets
+  `signingIdentity: "-"`.
+- **Ad-hoc signing (`"-"`).** Without it only the binary is linker-signed and
+  the bundle is not sealed (`codesign --verify --deep --strict` fails). Ad-hoc
+  is enough for an app built and run on the same machine — a locally built
+  bundle carries no quarantine flag, so Gatekeeper does not check it. Shipping
+  it to another Mac would need a Developer ID and notarization.
+- **`src-tauri/icons/macos/`** — the Dock icon: a plain red circle (#FF3B30,
+  824px diameter on a 1024 canvas, Apple's icon-grid margin), as `icon.icns`
+  plus PNGs. Generated with CoreGraphics + `sips` + `iconutil`; to change it,
+  regenerate `icon.png` at 1024×1024 and rebuild the rest:
+
+  ```sh
+  cd src-tauri/icons/macos && mkdir hark.iconset
+  for z in 16 32 128 256 512; do
+    sips -z $z $z icon.png --out hark.iconset/icon_${z}x${z}.png
+    sips -z $((z*2)) $((z*2)) icon.png --out hark.iconset/icon_${z}x${z}@2x.png
+  done
+  iconutil -c icns hark.iconset -o icon.icns && rm -r hark.iconset
+  sips -z 32 32 icon.png --out 32x32.png && sips -z 128 128 icon.png --out 128x128.png
+  ```
+
+If the Dock shows a stale or blank icon after an update, it is the icon cache:
+`killall Dock`. To confirm what is actually installed:
+`codesign --verify --deep --strict /Applications/hark.app`.
 
 ### If you would rather use Nix anyway
 
@@ -206,11 +300,11 @@ The likely snags are `cargo-tauri` not having a darwin build on that exact
 pinned nixpkgs revision, and Apple SDK framework linking. It is a fine thing to
 fix later; it is a bad thing to fight on day one.
 
-Do not assume the audio findings transfer. The 48kHz-only conclusion below is a
-fact about *this ThinkPad's* `sof-hda-dsp` sink. The mac mini's hardware may
-genuinely honour 44.1kHz and 96kHz, in which case `play_probe` plus `pw-top`'s
-macOS equivalent (Audio MIDI Setup, or `system_profiler SPAudioDataType`) is
-worth a look — hark already requests the file's native rate.
+The audio findings did not transfer, in the good direction. The 48kHz-only
+conclusion below is a fact about *the ThinkPad's* `sof-hda-dsp` sink. On the
+mac mini, `play_probe` on a 44.1kHz FLAC switched the built-in speakers from
+48000 to 44100 Hz for the duration (`system_profiler SPAudioDataType`, read
+mid-playback) — so there, native-rate playback is real.
 
 ---
 

@@ -22,7 +22,9 @@ pub fn decode_spec_of(path: &Path) -> anyhow::Result<crate::audio::decode::Strea
 /// Where the music lives, in priority order:
 ///   1. an explicit path argument (`hark /mnt/t7/music`)
 ///   2. `$HARK_MUSIC_DIR`
-///   3. `~/music`
+///   3. `~/music` — or `~/music-hark` on macOS, where `~/music` is the same
+///      folder as Apple's `~/Music` (APFS ignores case) and holds the Music
+///      app's library, which a sync would upload and then try to mirror over.
 ///
 /// A missing directory is not an error — the grid comes up empty and asks for a
 /// path, which is also the first-run experience on a new machine.
@@ -35,8 +37,13 @@ pub fn resolve_music_dir(arg: Option<&str>) -> Option<PathBuf> {
             return Some(PathBuf::from(shellexpand_home(&p)));
         }
     }
-    std::env::var("HOME").ok().map(|h| PathBuf::from(h).join("music"))
+    std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(DEFAULT_DIR_NAME))
 }
+
+#[cfg(target_os = "macos")]
+const DEFAULT_DIR_NAME: &str = "music-hark";
+#[cfg(not(target_os = "macos"))]
+const DEFAULT_DIR_NAME: &str = "music";
 
 fn shellexpand_home(p: &str) -> String {
     match p.strip_prefix("~/") {

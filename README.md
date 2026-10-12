@@ -34,7 +34,7 @@ cargo run --bin play_probe -- <album-dir>   # decode + play, no UI
 ## Using it
 
 ```
-hark [PATH]                  open a collection ($HARK_MUSIC_DIR, else ~/music)
+hark [PATH]                  open a collection ($HARK_MUSIC_DIR, else ~/music; ~/music-hark on macOS)
 hark sync [--check|--init]   reconcile with the remote
 hark normalize [--check]     rewrite folder names into Unicode NFC
 hark --help

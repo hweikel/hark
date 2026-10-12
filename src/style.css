@@ -172,6 +172,10 @@ body {
   cursor: pointer;
 }
 
+.np-button svg {
+  display: block;
+}
+
 .np-button:hover {
   color: var(--text);
 }

@@ -158,12 +158,16 @@ pub fn save(root: &Path, playlist: &Playlist) -> Result<()> {
 /// Both live under the music root, so this is always `../<artist>/...`. Falls
 /// back to an absolute path if the two somehow share no prefix, because a
 /// working absolute path beats a broken relative one.
+///
+/// Entries are canonicalized, so the root has to be too: a root reached
+/// through a symlink (macOS's `/var` → `/private/var`, or a music folder
+/// symlinked onto another disk) otherwise shares no prefix with its own tracks.
 fn relative_to(playlist_dir: &Path, target: &Path) -> String {
     let parent = match playlist_dir.parent() {
-        Some(p) => p,
+        Some(p) => p.canonicalize().unwrap_or_else(|_| p.to_path_buf()),
         None => return target.to_string_lossy().into_owned(),
     };
-    match target.strip_prefix(parent) {
+    match target.strip_prefix(&parent) {
         Ok(rest) => format!("../{}", rest.to_string_lossy()),
         Err(_) => target.to_string_lossy().into_owned(),
     }
