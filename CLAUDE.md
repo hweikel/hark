@@ -7,7 +7,7 @@ needs that isn't obvious from the code.
 ## Commands
 
 ```sh
-nix develop                                   # rust, cargo-tauri, webkitgtk — all pinned
+nix develop                                   # per-platform shell; Linux pulls webkitgtk
 cargo tauri dev                               # run the app, from the repo root
 cd src-tauri && cargo test                    # 103 tests
 cd src-tauri && cargo tauri build --no-bundle # release binary -> src-tauri/target/release/hark
@@ -21,7 +21,34 @@ reflects it.
 
 ---
 
-## Setting up a second machine — read this before syncing anything
+## Setting up the mac mini — the whole runbook
+
+Two independent tracks. **Track A (data) is the one with a trap in it**; track B
+(build) is just unfinished work. They don't depend on each other, so an agent
+can start on B while A's transfers run.
+
+### One repo, both machines — yes
+
+`main` serves both. Everything platform-specific is confined to `flake.nix`,
+which exposes a dev shell for `x86_64-linux`, `aarch64-darwin` and
+`x86_64-darwin`. The Rust and TypeScript are already portable — Tauri, cpal and
+symphonia all abstract the platform, and nothing is hand-gated by `#[cfg]`
+today. If that changes, use `#[cfg(target_os = "…")]` rather than branching the
+repo. `Cargo.lock` is shared and already resolves both platforms' dependency
+sets.
+
+Two things to expect, neither a problem:
+
+- `src-tauri/gen/schemas/` is generated per platform. The Linux machine
+  committed `linux-schema.json`; macOS will produce `macos-schema.json`.
+  Committing both is fine — just don't let one machine delete the other's.
+- The collection itself and its `.hark/` state are **not** in the repo. They
+  travel via B2. The sync watermark is deliberately per-machine, in
+  `~/.local/state/hark/`, so each machine tracks what it has replayed.
+
+---
+
+## Track A: the data — read this before syncing anything
 
 **Do not make `hark sync --init` the first thing you run on a machine that
 already holds its own copy of the collection.** It will quietly overwrite the
@@ -56,8 +83,7 @@ folders the NFC pass existed to remove.
 
 ### The order that works
 
-Tested end to end. Steps 0–2 are plain rclone and need no hark build, which
-matters because the dev shell does not currently work on macOS (see below).
+Tested end to end on a two-machine simulation against a scratch bucket.
 
 ```sh
 # 0. hark's filter rules (one tiny file)
@@ -95,14 +121,58 @@ Two notes:
 - The first `hark sync` afterwards prints a "skipped" line per journal entry.
   Expected: step 2 already moved those folders.
 
-### macOS is not yet a supported dev platform
+Steps 0–2 are pure rclone and need no hark build, so track A can be finished
+before track B is started. Only step 3 needs the binary.
 
-`flake.nix` hardcodes `system = "x86_64-linux"` and its `buildInputs` are
-Linux-only (`webkitgtk_4_1`, `gtk3`, `alsa-lib`). `nix develop` will not
-evaluate on a Mac. Building hark there needs a darwin branch in the flake with
-a different webview/audio stack — Tauri on macOS uses the system WebKit and
-there is no gtk. Until then, a Mac can still be brought into a correct synced
-state with steps 0–2 above, which are pure rclone.
+---
+
+## Track B: making it build on macOS
+
+`flake.nix` now exposes `aarch64-darwin` and `x86_64-darwin` dev shells
+alongside Linux. **They evaluate, but they have never been built or run** —
+they were written on the Linux machine, which cannot test them. Treat the
+darwin branch as a starting point to iterate on, not as known-good.
+
+What was done for you: the gtk/webkit/alsa stack is now `lib.optionals isLinux`,
+because macOS gets its webview from the system WKWebView and its audio from
+CoreAudio, neither of which nixpkgs vendors. The Linux-only env exports
+(`WEBKIT_DISABLE_DMABUF_RENDERER`, `GDK_BACKEND`, the gsettings paths) are
+likewise Linux-only now. The Linux shell was re-verified unchanged after the
+refactor: same env, 103 tests, release build.
+
+Prerequisites: Nix with flakes enabled, and Xcode command line tools
+(`xcode-select --install`) — the shell warns if they're missing.
+
+Climb this ladder; each rung needs less of the platform than the next:
+
+```sh
+cd src-tauri && cargo test                     # 1. no GUI, no audio device
+cargo run --bin scan_report -- ~/music         # 2. library layer against real files
+cargo run --bin play_probe -- <album-dir> 4    # 3. CoreAudio output
+cd .. && cargo tauri dev                       # 4. the actual window
+cargo tauri build --no-bundle                  # 5. release binary
+```
+
+Friction to expect, in rough order of likelihood:
+
+- **`cargo-tauri` from the pinned nixpkgs revision** may not have a darwin
+  build on that exact rev. If it doesn't, the npm `@tauri-apps/cli` is the
+  fallback — it is deliberately *not* used on Linux, but using it on macOS only
+  is an acceptable split.
+- **Apple SDK framework linking** (WebKit, CoreAudio, AppKit). These come from
+  the Xcode tools, not nixpkgs. If the linker can't find them, the usual
+  escapes are the `apple-sdk` package or dropping to a rustup toolchain outside
+  the nix shell for the build step.
+- **Codesigning.** Stay on `--no-bundle` at first; it produces a plain binary
+  and sidesteps signing entirely. A `.app` bundle needs a signing identity.
+- **`cargo tauri build` is slow the first time** (~4 min on the ThinkPad) and
+  webkitgtk is *not* being built on macOS, so it should be faster, not slower.
+
+Do not assume the audio findings transfer. The 48kHz-only conclusion below is a
+fact about *this ThinkPad's* `sof-hda-dsp` sink. The mac mini's hardware may
+genuinely honour 44.1kHz and 96kHz, in which case `play_probe` plus `pw-top`'s
+macOS equivalent (Audio MIDI Setup, or `system_profiler SPAudioDataType`) is
+worth a look — hark already requests the file's native rate.
 
 ---
 
