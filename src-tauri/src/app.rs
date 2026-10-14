@@ -183,8 +183,8 @@ pub fn save_album(
 
     let tracks_written = edit::write_tags(&edit).map_err(|e| format!("{e:#}"))?;
 
-    let cover = match cover_path.as_deref().filter(|p| !p.trim().is_empty()) {
-        Some(source) => edit::write_cover(&album_dir, &track_paths, Path::new(source))
+    let cover = match cover_path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        Some(source) => edit::write_cover(&album_dir, &track_paths, &user_path(source))
             .map_err(|e| format!("{e:#}"))?,
         None => edit::CoverReport::default(),
     };
@@ -303,7 +303,7 @@ pub fn save_playlist(
     };
 
     let cover = match cover_path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
-        Some(source) => playlist::CoverChange::Set(PathBuf::from(source)),
+        Some(source) => playlist::CoverChange::Set(user_path(source)),
         None if clear_cover => playlist::CoverChange::Clear,
         None => playlist::CoverChange::Keep,
     };
@@ -398,6 +398,22 @@ fn expand_home(p: &str) -> String {
             Err(_) => p.to_string(),
         },
         None => p.to_string(),
+    }
+}
+
+/// A path typed into a field: `~/` is the home directory, and so is the base of
+/// a relative path. The app's own working directory is meaningless to the
+/// person typing — launched from the Dock it is `/` — so `cover.jpg` would
+/// otherwise mean `/cover.jpg`.
+fn user_path(p: &str) -> PathBuf {
+    let p = expand_home(p);
+    let path = PathBuf::from(&p);
+    if path.is_absolute() {
+        return path;
+    }
+    match std::env::var("HOME") {
+        Ok(home) => Path::new(&home).join(path),
+        Err(_) => path,
     }
 }
 
