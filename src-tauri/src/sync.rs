@@ -32,10 +32,20 @@ use crate::bisync;
 use crate::library::journal::{self, RenameRecord};
 use crate::library::store::HARK_DIR;
 
-/// Default remote. The `b2-music` entry points at the same bucket as
-/// `b2-innercasmalia` but with `hard_delete = false`, so a deletion becomes a
+/// Default remote. One bucket holds everything now — `music/` alongside
+/// `aleph/`, `film/` and the rest — so the `music/` prefix is load-bearing:
+/// bisync against the bucket root would try to reconcile the whole archive
+/// against this collection.
+///
+/// The `b2` entry has `hard_delete = false`, so a deletion becomes a
 /// restorable hidden version rather than being gone for good.
-const DEFAULT_REMOTE: &str = "b2-music:innercasmalia/music";
+///
+/// Changed 2026-10-14, from `b2-music:innercasmalia/music`. The old buckets
+/// (`innercasmalia`, `outercasmalia`) were consolidated into `casmalia` and
+/// deleted. Moving to this remote needs a fresh baseline — `hark sync --init`
+/// — which was safe to run because `~/music` and the copied `casmalia/music`
+/// were verified identical first (2,224 files, 0 differences).
+const DEFAULT_REMOTE: &str = "b2:casmalia/music";
 
 /// Abort rather than propagate a deletion spree. Two or three albums is a
 /// normal cleanup; thirty means something went wrong.
