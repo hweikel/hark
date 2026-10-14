@@ -15,6 +15,7 @@ pub enum Invocation {
         root: PathBuf,
         check: bool,
         init: bool,
+        force: bool,
         remote: Option<String>,
     },
     /// Rewrite folder names into Unicode NFC.
@@ -57,6 +58,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Invocation {
                 root: resolve(path_argument(rest)),
                 check: has_flag(rest, "--check") || has_flag(rest, "--dry-run"),
                 init: has_flag(rest, "--init") || has_flag(rest, "--resync"),
+                force: has_flag(rest, "--force"),
                 remote: value_of(rest, "--remote"),
             }
         }
@@ -134,6 +136,24 @@ mod tests {
                 assert!(!check);
                 assert!(!init);
             }
+            other => panic!("expected Sync, got {}", describe(&other)),
+        }
+    }
+
+    #[test]
+    fn sync_force_is_recognised_and_off_by_default() {
+        // --force is how you say you looked at the difference and decided this
+        // machine is right. It must never be the default: --resync makes local
+        // win, so defaulting to it would make the guard decorative.
+        match parse(args(&["sync", "--init"])) {
+            Invocation::Sync { force, init, .. } => {
+                assert!(init);
+                assert!(!force, "--init alone must not imply --force");
+            }
+            other => panic!("expected Sync, got {}", describe(&other)),
+        }
+        match parse(args(&["sync", "--init", "--force"])) {
+            Invocation::Sync { force, .. } => assert!(force),
             other => panic!("expected Sync, got {}", describe(&other)),
         }
     }

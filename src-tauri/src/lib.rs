@@ -20,9 +20,10 @@ pub fn run() {
             root,
             check,
             init,
+            force,
             remote,
         } => {
-            let options = sync::Options::new(check, init, remote);
+            let options = sync::Options::new(check, init, force, remote);
             if let Err(e) = sync::run(&root, &options) {
                 eprintln!("hark sync: {e:#}");
                 std::process::exit(1);

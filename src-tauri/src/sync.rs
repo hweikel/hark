@@ -82,14 +82,18 @@ pub struct Options {
     pub check: bool,
     /// Establish the bisync baseline. Required once, before the first real sync.
     pub init: bool,
+    /// Let `--init` proceed even though the two sides disagree. Needed only
+    /// when you have looked at the difference and decided local is right.
+    pub force: bool,
     pub remote: String,
 }
 
 impl Options {
-    pub fn new(check: bool, init: bool, remote: Option<String>) -> Self {
+    pub fn new(check: bool, init: bool, force: bool, remote: Option<String>) -> Self {
         Options {
             check,
             init,
+            force,
             remote: remote
                 .or_else(|| std::env::var("HARK_REMOTE").ok())
                 .filter(|r| !r.trim().is_empty())
@@ -117,6 +121,7 @@ pub fn run(root: &Path, options: &Options) -> Result<()> {
     }
 
     replay_renames(root, options)?;
+    ensure_sides_agree(root, options, &filters)?;
     bisync(root, options, &filters)?;
 
     if !options.check {
@@ -291,6 +296,59 @@ fn remote_has(path: &str) -> bool {
         .output()
         .map(|o| o.status.success() && !o.stdout.is_empty())
         .unwrap_or(false)
+}
+
+/// Refuse `--init` when the two sides disagree.
+///
+/// `--init` runs `rclone bisync --resync`, and rclone's help is explicit that
+/// `--resync` means `--resync-mode path1` — **local wins every conflict**. On a
+/// machine that is simultaneously ahead and behind, that silently pushes its
+/// stale copies over the good ones on B2. This is the trap documented at length
+/// in CLAUDE.md, and it is the reason onboarding a second machine has a runbook
+/// rather than a command.
+///
+/// The documentation was not enough on its own: the safe order is "check, then
+/// init", and anybody — person or agent — reading a runbook top to bottom can
+/// still run the second command without acting on the first. So the tool now
+/// checks, and `--force` is how you say you looked.
+fn ensure_sides_agree(root: &Path, options: &Options, filters: &Path) -> Result<()> {
+    if !options.init || options.force || options.check {
+        return Ok(());
+    }
+    println!("checking that both sides agree before resyncing …");
+    let output = Command::new("rclone")
+        .arg("check")
+        .arg(root)
+        .arg(&options.remote)
+        .arg("--filter-from")
+        .arg(filters)
+        .arg("--size-only")
+        .output()
+        .context("running rclone check")?;
+
+    if output.status.success() {
+        println!("both sides agree; the resync has nothing to overwrite.\n");
+        return Ok(());
+    }
+
+    // A missing baseline is not a difference; a genuinely empty remote is the
+    // normal first-ever run and has nothing to lose.
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let summary = stderr
+        .lines()
+        .filter(|l| l.contains("differences found") || l.contains("ERROR"))
+        .take(6)
+        .collect::<Vec<_>>()
+        .join("\n  ");
+
+    bail!(
+        "the collection here and {} do not match, so --init would overwrite the \n\
+         remote with this machine's copy (--resync makes local win every \n\
+         conflict).\n\n  {summary}\n\n\
+         Reconcile first — CLAUDE.md has the order that works — or re-run with \n\
+         --force if this machine is definitely the one that is right.",
+        options.remote
+    );
 }
 
 fn bisync(root: &Path, options: &Options, filters: &Path) -> Result<()> {

@@ -329,15 +329,26 @@ rclone config create b2 b2 account=<keyID> key=<applicationKey> hard_delete=fals
 must be false, which is the reason the old `b2-music` remote existed at all.
 
 **A machine that has not yet synced against the new remote needs
-`hark sync --init`, and that is the dangerous one.** `--resync` makes path1
-(local) win every conflict, so verify the two sides agree *first*:
+`hark sync --init`.** `--resync` makes path1 (local) win every conflict, so an
+out-of-date machine would push its stale copy over B2.
+
+**`--init` now checks this itself** and refuses when the two sides disagree, so
+the sequence is just:
 
 ```sh
-rclone check ~/music b2:casmalia/music --size-only    # ~/music-hark on the mac
-hark sync --init                                       # only if 0 differences
+hark sync --init
 ```
 
-On the ThinkPad this was done on 2026-10-14 after confirming 2,224 files and 0
+It runs `rclone check` first and prints either *both sides agree; the resync has
+nothing to overwrite* or a refusal naming the difference. `--force` is how you
+say you have looked and this machine is the one that is right.
+
+The guard exists because documentation was not enough: the safe order is
+"check, then init", and anyone — person or agent — reading a runbook top to
+bottom can still run the second command without acting on the first. It was
+added on 2026-10-14 specifically so the mac could be set up unattended.
+
+On the ThinkPad the move was done after confirming 2,224 files and 0
 differences, so the resync had nothing to win. The mac has not been done yet.
 
 ---
