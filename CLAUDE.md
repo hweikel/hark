@@ -349,7 +349,16 @@ bottom can still run the second command without acting on the first. It was
 added on 2026-10-14 specifically so the mac could be set up unattended.
 
 On the ThinkPad the move was done after confirming 2,224 files and 0
-differences, so the resync had nothing to win. The mac has not been done yet.
+differences, so the resync had nothing to win.
+
+The mac was done the same day, and **the guard earned its keep on its first
+run**: `--init` refused, because the mac held stale copies of one album
+(Stornoway, *Beachcombers Windowsill*, 11 tracks, each 14 bytes short of B2's
+re-tagged Oct 13 versions) plus a `library.json` missing that album from a list.
+Forcing would have pushed the old tags over the new ones. Reconciled with the
+order above (step 1 had nothing to push; step 2 pulled exactly those 12 files
+and deleted nothing), after which `--init` reported agreement and `--check`
+transferred nothing. 2,190 files on each side.
 
 ---
 
