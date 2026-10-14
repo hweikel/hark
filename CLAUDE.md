@@ -308,6 +308,40 @@ mid-playback) — so there, native-rate playback is real.
 
 ---
 
+## The remote changed, 2026-10-14
+
+`innercasmalia` and `outercasmalia` were consolidated into a single B2 bucket,
+`casmalia`, and both old buckets were deleted along with the `b2-music`,
+`b2-innercasmalia`, `b2-outercasmalia` and `b2-all` remotes. There is now one
+rclone remote, `b2`, and hark!'s default is `b2:casmalia/music`.
+
+**The `music/` prefix is load-bearing now.** One bucket holds `aleph/`, `film/`,
+`writing/` and the rest alongside it, so a bisync against the bucket root would
+try to reconcile the entire archive against this collection.
+
+Each machine needs the remote configured once, with a key scoped to `casmalia`:
+
+```sh
+rclone config create b2 b2 account=<keyID> key=<applicationKey> hard_delete=false
+```
+
+`account` wants the **keyID**, not the 12-character account ID. `hard_delete`
+must be false, which is the reason the old `b2-music` remote existed at all.
+
+**A machine that has not yet synced against the new remote needs
+`hark sync --init`, and that is the dangerous one.** `--resync` makes path1
+(local) win every conflict, so verify the two sides agree *first*:
+
+```sh
+rclone check ~/music b2:casmalia/music --size-only    # ~/music-hark on the mac
+hark sync --init                                       # only if 0 differences
+```
+
+On the ThinkPad this was done on 2026-10-14 after confirming 2,224 files and 0
+differences, so the resync had nothing to win. The mac has not been done yet.
+
+---
+
 ## Invariants worth not breaking
 
 **NFC is identity; on-disk bytes are for the filesystem.** `rel_path` and the
