@@ -9,13 +9,143 @@
 
   outputs = { self, nixpkgs }:
     let
-      # The ThinkPad is the Linux one; the mac mini is almost certainly
-      # aarch64-darwin, with x86_64-darwin here for an Intel Mac.
+      # x86_64-linux is the dev machine and the only one this flake packages.
+      # The darwin shells are kept for completeness; macOS installs a release
+      # build from GitHub Releases instead (see RELEASING.md).
       systems = [ "x86_64-linux" "aarch64-darwin" "x86_64-darwin" ];
       forAllSystems = f:
         nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
+
+      # One source of truth for the version, so a release bumps three files
+      # rather than four. The release workflow refuses a tag that disagrees.
+      version = (builtins.fromTOML (builtins.readFile ./src-tauri/Cargo.toml)).package.version;
     in
     {
+      # `nix profile install github:hweikel/hark/v0.1.0#hark` — the tag in the
+      # flake ref is the pin. Nothing in here names a version to chase, and
+      # `nix profile upgrade` is deliberately a no-op against an immutable tag:
+      # moving to a new release is an explicit reinstall at the new tag.
+      packages.x86_64-linux =
+        let
+          pkgs = nixpkgs.legacyPackages.x86_64-linux;
+
+          # The release binary embeds the frontend — tauri-build reads
+          # ../dist at compile time — so the npm half is a separate derivation
+          # and the cargo half only has to stage its output. No cargo-tauri
+          # involved: `cargo build --release` produces the whole app once
+          # dist/ exists.
+          frontend = pkgs.buildNpmPackage {
+            pname = "hark-frontend";
+            inherit version;
+            src = self;
+
+            npmDeps = pkgs.importNpmLock { npmRoot = self; };
+            npmConfigHook = pkgs.importNpmLock.npmConfigHook;
+
+            # `npm run build` is tsc --noEmit && vite build.
+            installPhase = ''
+              runHook preInstall
+              cp -r dist $out
+              runHook postInstall
+            '';
+          };
+        in
+        rec {
+          default = hark;
+
+          hark = pkgs.rustPlatform.buildRustPackage {
+            pname = "hark";
+            inherit version;
+            src = self;
+
+            # The cargo project is src-tauri/, not the repo root.
+            cargoRoot = "src-tauri";
+            buildAndTestSubdir = "src-tauri";
+            cargoLock.lockFile = ./src-tauri/Cargo.lock;
+
+            # Just the app. scan_report and play_probe are verification tools
+            # for a dev shell, not things to put on a user's PATH.
+            cargoBuildFlags = [ "--bin" "hark" ];
+
+            # **Load-bearing.** tauri's build script does `dev = !custom_protocol`,
+            # so without this feature the binary ignores its own embedded
+            # frontend and tries to load build.devUrl — a window that says
+            # "Could not connect to localhost: Connection refused". The Tauri
+            # CLI passes this for you; a plain `cargo build --release`, which
+            # is what this derivation runs, does not.
+            buildFeatures = [ "tauri/custom-protocol" ];
+
+            # The suite needs no GUI and no audio device, but it is the dev
+            # loop's job and CI's — running it here would only slow the
+            # install down.
+            doCheck = false;
+
+            nativeBuildInputs = with pkgs; [ pkg-config wrapGAppsHook3 ];
+
+            buildInputs = with pkgs; [
+              # Tauri's Linux webview stack: Tauri 2 targets the 4.1 ABI,
+              # which is gtk3-based.
+              webkitgtk_4_1
+              libsoup_3
+              gtk3
+              glib
+              cairo
+              pango
+              gdk-pixbuf
+              atk
+              librsvg
+
+              # cpal talks ALSA; PipeWire's compat layer carries it into the
+              # graph.
+              alsa-lib
+
+              # Both are here for wrapGAppsHook3 to find: without the
+              # gsettings schemas, GTK's file chooser (the cover-art picker in
+              # the edit modal) aborts on open.
+              gsettings-desktop-schemas
+              glib-networking
+            ];
+
+            # preBuild runs at the source root, before the build hook descends
+            # into src-tauri — which is exactly where ../dist has to be.
+            preBuild = ''
+              cp -r ${frontend} dist
+            '';
+
+            preFixup = ''
+              # WebKitGTK's DMA-BUF renderer paints a blank white window on a
+              # lot of Nix setups. Disabling it costs nothing for a grid of
+              # static images. This is the one dev-shell export that is a real
+              # runtime requirement rather than an i3 detail.
+              gappsWrapperArgs+=(--set WEBKIT_DISABLE_DMABUF_RENDERER 1)
+            '';
+
+            postInstall = ''
+              # The .desktop entry says `Exec=hark`, resolved from PATH, which
+              # is what makes this work from rofi with no rewriting:
+              # nix profile puts the binary and this file in the same profile.
+              install -Dm644 ${./packaging/hark.desktop} \
+                $out/share/applications/hark.desktop
+
+              for size in 32x32 128x128 256x256 512x512; do
+                install -Dm644 ${./src-tauri/icons}/$size.png \
+                  $out/share/icons/hicolor/$size/apps/hark.png
+              done
+
+              # The crate also builds as a cdylib/staticlib for Tauri's mobile
+              # targets; nothing uses those here.
+              rm -rf $out/lib
+            '';
+
+            meta = {
+              description = "A music player that respects perfect albums";
+              homepage = "https://github.com/hweikel/hark";
+              mainProgram = "hark";
+              platforms = [ "x86_64-linux" ];
+            };
+          };
+        };
+
       devShells = forAllSystems (pkgs:
         let
           inherit (pkgs.stdenv) isLinux isDarwin;
@@ -55,6 +185,11 @@
                 # (already enabled in configuration.nix) carries it into the
                 # PipeWire graph.
                 alsa-lib
+
+                # The window is translucent and i3 does not composite, so
+                # without a compositor running the 50% background renders
+                # black. See packaging/picom.conf.
+                picom
               ];
 
             shellHook =
@@ -84,6 +219,8 @@
                 echo "  cargo tauri dev                      run the app (from repo root)"
                 echo "  cd src-tauri && cargo test           run tests"
                 echo "  cd src-tauri && cargo run --bin scan_report -- ~/music"
+              '' + pkgs.lib.optionalString isLinux ''
+                echo "  picom -b --config packaging/picom.conf   compositor, for the translucent background"
               '';
           };
         });

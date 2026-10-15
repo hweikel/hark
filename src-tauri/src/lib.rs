@@ -4,6 +4,11 @@ pub mod bisync;
 pub mod cli;
 pub mod library;
 pub mod sync;
+// Self-update exists for the mac, which installs releases instead of building
+// them. The Linux build comes from the flake and lives in the read-only Nix
+// store, so it must not try to overwrite itself.
+#[cfg(target_os = "macos")]
+pub mod update;
 
 use std::path::PathBuf;
 
@@ -61,12 +66,21 @@ pub fn run() {
 }
 
 fn run_gui(root: PathBuf) {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+
+    builder
         .register_asynchronous_uri_scheme_protocol("hark", |ctx, request, responder| {
             app::handle_art_request(ctx.app_handle(), request, responder);
         })
         .setup(move |handle| {
             let app_handle = handle.handle().clone();
+
+            #[cfg(target_os = "macos")]
+            update::check_on_launch(handle.handle());
+
             // The audio thread pushes state changes out as events rather than
             // the frontend polling — track changes originate down here when a
             // song ends, not from anything the UI did.

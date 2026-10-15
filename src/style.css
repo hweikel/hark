@@ -1,16 +1,27 @@
 /* hark!
    The whole point is the cover images. No shadows, no depth effects, nothing
-   that competes with artwork. Sections are separated by thin gold hairlines. */
+   that competes with artwork. Sections are separated by thin red hairlines. */
 
 :root {
   /* the ink of the night sky */
   --ink: #0a0d16;
   --ink-raised: #10141f;
 
-  /* restrained antique gold, not yellow */
-  --gold: #c9a227;
-  --gold-hairline: rgba(201, 162, 39, 0.28);
-  --gold-dim: rgba(201, 162, 39, 0.6);
+  /* Only `html, body` uses this. Every panel that carries text or artwork —
+     modals, the picker, cover placeholders — stays on opaque --ink /
+     --ink-raised, or it would be read against whatever is on the desktop
+     behind it.
+
+     It shows as 50% translucent where the window itself is transparent, which
+     today is macOS only; on Linux WebKitGTK composites the page opaque and
+     this blends against the same colour, so it is a no-op there. See
+     CLAUDE.md. */
+  --ink-translucent: rgba(10, 13, 22, 0.5);
+
+  /* pure red, rgb(255, 0, 0) */
+  --accent: #ff0000;
+  --accent-hairline: rgba(255, 0, 0, 0.28);
+  --accent-dim: rgba(255, 0, 0, 0.6);
 
   --text: #e8e4da;
   --text-muted: #857f71;
@@ -32,7 +43,7 @@ body {
   margin: 0;
   padding: 0;
   height: 100%;
-  background: var(--ink);
+  background: var(--ink-translucent);
   color: var(--text);
   font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", ui-monospace, monospace;
   font-size: 12px;
@@ -61,7 +72,7 @@ body {
   gap: 10px;
   padding: 0 var(--pad);
   height: 38px;
-  border-bottom: 1px solid var(--gold-hairline);
+  border-bottom: 1px solid var(--accent-hairline);
 }
 
 .searchbar input {
@@ -96,7 +107,7 @@ body {
   grid-template-columns: 148px minmax(180px, 280px) 1fr;
   gap: 22px;
   padding: 18px var(--pad);
-  border-bottom: 1px solid var(--gold-hairline);
+  border-bottom: 1px solid var(--accent-hairline);
   max-height: 212px;
 }
 
@@ -122,7 +133,7 @@ body {
   display: grid;
   place-items: center;
   padding: 10px;
-  border: 1px solid var(--gold-hairline);
+  border: 1px solid var(--accent-hairline);
 }
 
 .np-side {
@@ -182,8 +193,8 @@ body {
 
 /* Shuffle is the only control with a persistent on/off state worth showing. */
 .np-button.on {
-  color: var(--gold);
-  border-color: var(--gold-hairline);
+  color: var(--accent);
+  border-color: var(--accent-hairline);
 }
 
 .np-tracks {
@@ -193,7 +204,7 @@ body {
   overflow-y: auto;
   min-width: 0;
   scrollbar-width: thin;
-  scrollbar-color: var(--gold-hairline) transparent;
+  scrollbar-color: var(--accent-hairline) transparent;
 }
 
 .np-track {
@@ -211,7 +222,7 @@ body {
 }
 
 .np-track.current {
-  color: var(--gold);
+  color: var(--accent);
 }
 
 .np-num {
@@ -237,7 +248,7 @@ body {
   overflow-x: hidden;
   padding: var(--pad) var(--pad) 60px;
   scrollbar-width: thin;
-  scrollbar-color: var(--gold-hairline) transparent;
+  scrollbar-color: var(--accent-hairline) transparent;
 }
 
 .zone {
@@ -255,7 +266,7 @@ body {
 
 .hairline {
   height: 1px;
-  background: var(--gold-hairline);
+  background: var(--accent-hairline);
   margin: calc(var(--pad) + 6px) 0 var(--pad);
 }
 
@@ -264,13 +275,13 @@ body {
   flex-direction: column;
   gap: 8px;
   cursor: pointer;
-  /* The gold outline sits in this padding when the tile is active. */
+  /* The accent outline sits in this padding when the tile is active. */
   padding: 5px;
   border-radius: 1px;
 }
 
 .tile.active {
-  outline: 1px solid var(--gold);
+  outline: 1px solid var(--accent);
   outline-offset: 0;
 }
 
@@ -294,7 +305,7 @@ body {
   display: grid;
   place-items: center;
   padding: 12px;
-  border: 1px solid var(--gold-hairline);
+  border: 1px solid var(--accent-hairline);
 }
 
 .cover-text {
@@ -358,7 +369,7 @@ body {
 .picker {
   width: min(460px, 86vw);
   background: var(--ink);
-  border: 1px solid var(--gold-hairline);
+  border: 1px solid var(--accent-hairline);
   padding: 16px 18px;
   display: flex;
   flex-direction: column;
@@ -373,7 +384,7 @@ body {
 .picker-input {
   background: transparent;
   border: none;
-  border-bottom: 1px solid var(--gold-hairline);
+  border-bottom: 1px solid var(--accent-hairline);
   color: var(--text);
   font: inherit;
   padding: 4px 0;
@@ -388,7 +399,7 @@ body {
   max-height: 44vh;
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: var(--gold-hairline) transparent;
+  scrollbar-color: var(--accent-hairline) transparent;
 }
 
 .picker-item {
@@ -402,7 +413,7 @@ body {
 
 .picker-item:hover,
 .picker-item.on {
-  color: var(--gold);
+  color: var(--accent);
 }
 
 .picker-new {
@@ -420,21 +431,21 @@ body {
   width: min(620px, 90vw);
   max-height: 76vh;
   background: var(--ink);
-  border: 1px solid var(--gold-hairline);
+  border: 1px solid var(--accent-hairline);
   padding: 18px 20px;
   display: flex;
   flex-direction: column;
   gap: 12px;
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: var(--gold-hairline) transparent;
+  scrollbar-color: var(--accent-hairline) transparent;
 }
 
 .modal-heading {
-  color: var(--gold);
+  color: var(--accent);
   letter-spacing: 0.04em;
   padding-bottom: 8px;
-  border-bottom: 1px solid var(--gold-hairline);
+  border-bottom: 1px solid var(--accent-hairline);
 }
 
 .modal-field {
@@ -451,7 +462,7 @@ body {
 .modal input:not([type="checkbox"]) {
   background: transparent;
   border: none;
-  border-bottom: 1px solid var(--gold-hairline);
+  border-bottom: 1px solid var(--accent-hairline);
   color: var(--text);
   font: inherit;
   padding: 4px 0;
@@ -461,7 +472,7 @@ body {
 }
 
 .modal input:not([type="checkbox"]):focus {
-  border-bottom-color: var(--gold);
+  border-bottom-color: var(--accent);
 }
 
 .modal-check {
@@ -473,20 +484,20 @@ body {
 }
 
 .modal-check input {
-  accent-color: var(--gold);
+  accent-color: var(--accent);
 }
 
-/* The rename preview: quiet when nothing moves, gold when a folder will. */
+/* The rename preview: quiet when nothing moves, red when a folder will. */
 .modal-rename {
   color: var(--text-muted);
   font-size: 11px;
   padding: 6px 0;
-  border-top: 1px solid var(--gold-hairline);
-  border-bottom: 1px solid var(--gold-hairline);
+  border-top: 1px solid var(--accent-hairline);
+  border-bottom: 1px solid var(--accent-hairline);
 }
 
 .modal-rename.moving {
-  color: var(--gold);
+  color: var(--accent);
 }
 
 .modal-tracks {
@@ -496,7 +507,7 @@ body {
   max-height: 34vh;
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: var(--gold-hairline) transparent;
+  scrollbar-color: var(--accent-hairline) transparent;
 }
 
 .modal-track {
@@ -523,15 +534,15 @@ body {
 
 .modal-actions button {
   background: transparent;
-  border: 1px solid var(--gold-hairline);
-  color: var(--gold);
+  border: 1px solid var(--accent-hairline);
+  color: var(--accent);
   font: inherit;
   padding: 5px 16px;
   cursor: pointer;
 }
 
 .modal-actions button:hover:not(:disabled) {
-  border-color: var(--gold);
+  border-color: var(--accent);
 }
 
 .modal-actions button:disabled {
@@ -552,7 +563,7 @@ body {
   width: 72px;
   height: 72px;
   object-fit: cover;
-  border: 1px solid var(--gold-hairline);
+  border: 1px solid var(--accent-hairline);
 }
 
 .playlist-cover-fields {
@@ -592,8 +603,8 @@ body {
 }
 
 .playlist-track-button:hover:not(:disabled) {
-  color: var(--gold);
-  border-color: var(--gold-hairline);
+  color: var(--accent);
+  border-color: var(--accent-hairline);
 }
 
 .playlist-track-button:disabled {
@@ -618,7 +629,7 @@ body {
 }
 
 .setup h1 {
-  color: var(--gold);
+  color: var(--accent);
   font-size: 15px;
   font-weight: 700;
   margin: 0;
@@ -634,7 +645,7 @@ body {
 .setup form {
   display: flex;
   gap: 10px;
-  border-bottom: 1px solid var(--gold-hairline);
+  border-bottom: 1px solid var(--accent-hairline);
   padding-bottom: 8px;
 }
 
@@ -650,13 +661,13 @@ body {
 
 .setup button {
   background: transparent;
-  border: 1px solid var(--gold-hairline);
-  color: var(--gold);
+  border: 1px solid var(--accent-hairline);
+  color: var(--accent);
   font: inherit;
   padding: 4px 14px;
   cursor: pointer;
 }
 
 .setup button:hover {
-  border-color: var(--gold);
+  border-color: var(--accent);
 }

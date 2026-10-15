@@ -8,20 +8,23 @@ hark! doesn't: albums you mark **perfect** get the marquee, everything else is
 still there but visibly demoted, and playlists are real objects — references,
 not copies — so a song can sit on a playlist *and* on the album it came from.
 
-One window, one view. Night-sky ink, thin gold hairlines, no chrome competing
-with the cover art.
+One window, one view. Night-sky ink — translucent on macOS — thin red
+hairlines, no chrome competing with the cover art.
 
 ## Running it
 
 ```sh
-nix develop            # rust, cargo-tauri, webkitgtk — all pinned
+nix develop            # rust, cargo-tauri, webkitgtk, picom — all pinned
 cargo tauri dev        # from the repo root
 ```
 
-Setting up a **second machine** that already holds its own copy of the
-collection? Read `CLAUDE.md` first — `hark sync --init` resolves conflicts in
-favour of the local side, so running it there first overwrites whatever was
-edited elsewhere. There is a tested order that doesn't.
+The window is 50% translucent on macOS. On Linux it is opaque: WebKitGTK
+composites the page opaque there whatever the window asks for — see `CLAUDE.md`
+for what was measured and how to retry it.
+
+**Installing** a tagged release, on either platform, is `RELEASING.md`:
+`nix profile install github:hweikel/hark/v0.1.0#hark` on NixOS, and on macOS
+download the `.app.tar.gz` from the release, after which hark! updates itself.
 
 Other useful commands, from `src-tauri/`:
 

@@ -1,0 +1,118 @@
+name: release
+
+# Releases are cut by tag, never by a push to main. The mac mini installs what
+# this workflow publishes and builds nothing itself, so publishing has to be a
+# deliberate act with a version attached to it. See RELEASING.md.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  # Three files carry the version, and the updater compares the one in
+  # tauri.conf.json against what latest.json announces. A tag that disagrees
+  # with them publishes a release the installed app never considers an upgrade
+  # — a silent failure, discovered weeks later. Refuse in five seconds instead
+  # of discovering it after two builds.
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches the version in the tree
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          conf=$(jq -r .version src-tauri/tauri.conf.json)
+          pkg=$(jq -r .version package.json)
+          crate=$(sed -n '/^\[package\]/,/^\[/ s/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml)
+          echo "tag=$tag  tauri.conf.json=$conf  package.json=$pkg  Cargo.toml=$crate"
+          for v in "$conf" "$pkg" "$crate"; do
+            if [ "$v" != "$tag" ]; then
+              echo "::error::tag v$tag disagrees with $v in the tree — bump all three, commit, retag"
+              exit 1
+            fi
+          done
+
+  build:
+    needs: verify
+    strategy:
+      fail-fast: false
+      # Both jobs upload into the same release and both rewrite its
+      # latest.json. Serialise them rather than race.
+      max-parallel: 1
+      matrix:
+        include:
+          # A courtesy .deb for some other Linux box. This laptop installs the
+          # flake package instead, built from the same tag. It produces no
+          # updater artifacts (Tauri's Linux updater only knows AppImage), so
+          # it must not be the job that writes latest.json — hence both the
+          # flag and running it first.
+          - platform: ubuntu-24.04
+            args: ""
+            updaterJson: false
+          # Apple Silicon runner — the mac mini is an M4. No Intel build:
+          # nothing here runs one. This is the job latest.json comes from.
+          - platform: macos-14
+            args: --target aarch64-apple-darwin
+            updaterJson: true
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # Same compiler as rust-toolchain.toml and the flake, so a green build
+      # here means something on the laptop.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+
+      - name: Linux build dependencies
+        if: matrix.platform == 'ubuntu-24.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
+            libasound2-dev
+        # libasound2-dev is not in Tauri's published list: cpal needs ALSA
+        # headers and nothing else here pulls them in.
+
+      # `npm ci`, not `npm install` — it installs exactly the lockfile and
+      # never rewrites it.
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The updater's minisign keypair. Unrelated to Apple codesigning;
+          # this is what the installed app verifies before replacing itself.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: hark! __VERSION__
+          releaseBody: |
+            **macOS (Apple Silicon)** — download `hark_*_aarch64.app.tar.gz`,
+            then:
+
+            ```sh
+            tar xzf hark_*_aarch64.app.tar.gz
+            mv hark.app /Applications/
+            xattr -dr com.apple.quarantine /Applications/hark.app
+            ```
+
+            First launch of an unsigned app needs System Settings → Privacy &
+            Security → Open Anyway. After that, hark! updates itself.
+
+            **NixOS** — `nix profile install github:hweikel/hark/${{ github.ref_name }}#hark`
+
+            Full instructions: `RELEASING.md`.
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
+          uploadUpdaterJson: ${{ matrix.updaterJson }}

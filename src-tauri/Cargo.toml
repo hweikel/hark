@@ -17,7 +17,11 @@ crate-type = ["lib", "cdylib", "staticlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# `macos-private-api` is what `app.macOSPrivateApi` in tauri.conf.json demands:
+# tauri-build refuses to compile if the config flag is set without it. It is
+# the transparent-window API on macOS, and a no-op on Linux — where the window
+# is transparent anyway, provided a compositor is running.
+tauri = { version = "2", features = ["macos-private-api"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 lofty = "0.25"
@@ -30,6 +34,15 @@ cpal = "0.18.2"
 ringbuf = "0.5.3"
 rand = "0.10.3"
 symphonia = { version = "0.6.1", features = ["mp3", "flac", "aac", "alac", "isomp4", "ogg", "vorbis", "wav", "pcm"] }
+
+# Self-update, for the machine that installs releases rather than building
+# them. Target-scoped so the Linux build never compiles the plugin or its HTTP
+# stack: that build is installed into the read-only Nix store, where an app
+# that overwrote itself would fail anyway. The consequence is that `src/update.rs`
+# is not type-checked by `cargo test` here — the macOS CI job is the first
+# compiler to see it.
+[target.'cfg(target_os = "macos")'.dependencies]
+tauri-plugin-updater = "2"
 
 [profile.dev]
 # Dependencies get optimized even in dev: decoding 212 JPEGs and running a FLAC

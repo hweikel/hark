@@ -10,6 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "main",
@@ -18,7 +19,7 @@
         "height": 820,
         "resizable": true,
         "decorations": true,
-        "backgroundColor": "#0a0d16"
+        "transparent": true
       }
     ],
     "security": {
@@ -29,5 +30,11 @@
     "active": true,
     "targets": ["deb"],
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.png"]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": ["https://github.com/hweikel/hark/releases/latest/download/latest.json"],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVGRjYwMjU2RkYyQzRFQUEKUldTcVRpei9WZ0wyNzYxTnFQd29Ob21PbVBrZC82U3dCNVROV2d2MUZMbjFxM1dsaUFzNmwzYWgK"
+    }
   }
 }

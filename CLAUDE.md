@@ -1,407 +1,192 @@
 # Working on hark!
 
-A music player that respects perfect albums. See `README.md` for what it is and
-why it makes the choices it does; this file is the operational stuff an agent
-needs that isn't obvious from the code.
+A music player that respects perfect albums. `README.md` says what it is and why
+it makes the choices it does; `RELEASING.md` covers cutting a release and
+installing one. This file is the operational stuff an agent needs that isn't
+obvious from the code.
+
+**The NixOS ThinkPad is the only machine that builds hark!** The mac mini
+installs releases and never clones the repo, so a change is not "shipped" until
+it is tagged — see `RELEASING.md`.
 
 ## Commands
 
-Linux (Nix):
-
 ```sh
-nix develop                                   # rust, cargo-tauri, webkitgtk — all pinned
+nix develop                                   # rust 1.95, cargo-tauri, webkitgtk, picom — all pinned
 cargo tauri dev                               # run the app, from the repo root
-cd src-tauri && cargo test                    # 103 tests
+picom -b --config packaging/picom.conf        # only needed to retry transparency on Linux — see below
+cd src-tauri && cargo test                    # 112 tests, no GUI and no audio device needed
 cd src-tauri && cargo tauri build --no-bundle # release binary -> src-tauri/target/release/hark
 npm run build                                 # tsc --noEmit && vite build
-./packaging/install-local.sh                  # put hark on PATH + in the launcher
+nix build .#hark && ./result/bin/hark         # the packaged build, as installed
 ```
 
-macOS (rustup + npm, no Nix — see Track B):
+Verification binaries, from `src-tauri/`:
 
 ```sh
-npm install && npm run tauri dev
-cd src-tauri && cargo test
-npm run tauri build                           # hark.app, then install it — see "Installing on macOS"
+cargo run --bin scan_report -- ~/music        # what the scanner sees
+cargo run --bin play_probe -- <album-dir> 4   # decode + play, no UI
 ```
 
-The release binary embeds the frontend, so a frontend change needs
-`cargo tauri build`, not just `npm run build`, before the installed `hark`
-reflects it.
-
----
-
-## Setting up the mac mini — the whole runbook
-
-Two independent tracks. **Track A (data) is the one with a trap in it**; track B
-(build) is just unfinished work. They don't depend on each other, so an agent
-can start on B while A's transfers run.
-
-**Status, 2026-10-12: both tracks are done on the mac mini.** What it took,
-beyond what is written below:
-
-- **The collection lives at `~/music-hark`, not `~/music`.** APFS is
-  case-insensitive, so `~/music` *is* `~/Music` — the Music app's library. The
-  runbook as written would have uploaded that library to B2 and then
-  `rclone sync` would have tried to mirror B2 over it. hark now defaults to
-  `~/music-hark` on macOS (`library::resolve_music_dir`). The mac's divergent
-  copy had been sitting in `~/music_backup` (Doppler's library folder) and was
-  renamed into place.
-- **There is no `b2-music` remote in the mac's rclone.conf** — just
-  `b2-innercasmalia`, which there already has `hard_delete = false`. A
-  `b2-music` alias pointing at it was added so the default remote resolves.
-- **The journalled renames were replayed locally before step 1** (see the
-  note under step 1 — without that, step 1 itself re-uploads the old names).
-- Only 16 files were genuinely mac-only (BIALYSTOCKS, two Le Petit Chou
-  albums, one Unknown Artist track) and went up in step 1. Step 2 then pulled
-  864 re-tagged files plus 36 new ones (9.3 GiB); none of the replaced local
-  copies was newer than B2's. `rclone check` afterwards: 0 differences.
-
-### One repo, both machines — yes
-
-`main` serves both, and the split is only in how each machine *gets a
-toolchain* — Linux through `flake.nix`, macOS through rustup and npm. The
-source is shared whole: Tauri, cpal and symphonia abstract the platform, and
-nothing is hand-gated by `#[cfg]` today. If that changes, use
-`#[cfg(target_os = "…")]` rather than branching the repo. `Cargo.lock`,
-`rust-toolchain.toml` and `package.json` are common to both, and `Cargo.lock`
-already resolves both platforms' dependency sets.
-
-Two things to expect, neither a problem:
-
-- `src-tauri/gen/schemas/` is generated per platform. The Linux machine
-  committed `linux-schema.json`; macOS will produce `macos-schema.json`.
-  Committing both is fine — just don't let one machine delete the other's.
-- The collection itself and its `.hark/` state are **not** in the repo. They
-  travel via B2. The sync watermark is deliberately per-machine, in
-  `~/.local/state/hark/`, so each machine tracks what it has replayed.
-
----
-
-## Track A: the data — read this before syncing anything
-
-**Do not make `hark sync --init` the first thing you run on a machine that
-already holds its own copy of the collection.** It will quietly overwrite the
-good data on B2 with that machine's stale copy.
-
-`hark sync --init` runs `rclone bisync --resync`, and rclone's help says:
-
-> `--resync` — Equivalent to `--resync-mode path1`
-
-hark passes the local collection as path1 and the remote as path2, so **local
-wins every conflict**. For a machine that is simultaneously ahead (albums only
-it has) and behind (everything edited elsewhere since), the two halves resolve
-differently:
-
-| | result of a naive `--init` |
-|---|---|
-| file only on that machine | uploaded — correct |
-| file only on B2 | downloaded — correct |
-| file on both, contents differ | **that machine's older copy is pushed to B2** |
-
-That last row is every track whose tags or embedded art were edited elsewhere.
-Verified by simulation, not inferred: with B2 holding a freshly tagged track
-and the second machine holding the stale one, a naive `--init` left the stale
-bytes on B2.
-
-There is a second, quieter failure in the same situation. A machine that has
-not synced recently still has the **old folder names** (decomposed `Björk`,
-`Mount Kimbie/…`, `In Focus?`) *and* a stale `.hark/renames.jsonl`, so the
-rename replay has nothing to replay. bisync then reads those old-named folders
-as content only that machine has, and uploads them — recreating the duplicate
-folders the NFC pass existed to remove.
-
-### The order that works
-
-Tested end to end on a two-machine simulation against a scratch bucket.
+Releasing and installing (details in `RELEASING.md`):
 
 ```sh
-# 0. hark's filter rules (one tiny file)
-rclone copy b2-music:innercasmalia/music/.hark ~/music/.hark
-
-# 1. push ONLY what B2 lacks. --ignore-existing is the safety: it cannot
-#    overwrite a file that is already up there, so nothing edited elsewhere
-#    is at risk. This is what rescues the albums only this machine has.
-rclone copy ~/music b2-music:innercasmalia/music \
-  --filter-from ~/music/.hark/sync-filters.txt --ignore-existing --progress --dry-run
-
-# 2. now make this machine an exact copy of B2 — which by now includes the
-#    albums step 1 just pushed.
-rclone sync b2-music:innercasmalia/music ~/music \
-  --filter-from ~/music/.hark/sync-filters.txt --progress --dry-run
-
-# 3. both sides already agree, so the baseline is trivially correct
-hark sync --init
+git tag -a v0.1.1 -m v0.1.1 && git push --follow-tags   # builds both platforms, publishes a Release
+nix profile install github:hweikel/hark/v0.1.1#hark     # the laptop's launcher entry
 ```
 
-Run 1 and 2 with `--dry-run` first and read the output. **Step 1 must precede
-step 2**: step 2 deletes anything local that is not on B2, so this machine's
-new albums have to be up there already.
+The release binary embeds the frontend, so a frontend-only change still needs a
+`cargo tauri build` (or `nix build`) before an installed `hark` reflects it.
 
-Afterwards the watermark is set and ordinary `hark sync` on either machine is
-safe — bisync's steady state is what it is good at. The hazard is specific to
-onboarding a machine with a divergent copy.
+## Architecture
 
-Three notes:
+Rust/Tauri 2 backend, TypeScript frontend with no framework, one window.
 
-- **Step 1 has the same old-names trap as a naive `--init`.** `--ignore-existing`
-  protects files that are on B2 *at the same path* — but a folder the journal
-  renamed (`Mount Kimbie/The Sunset Violent` → `King Krule/…`,
-  `In Focus?` → `In Focus`) is not at the same path, so step 1 would upload it
-  under its old name and recreate the duplicate. On the mac mini that was 35 of
-  the 51 files step 1 wanted to push. Replay the journal locally first (plain
-  `mv` for real renames; for NFC-only ones on APFS, rename through a temp name,
-  since a direct rename between two normalizations of one name is a no-op), and
-  read step 1's dry-run against `.hark/renames.jsonl`.
-- Step 2 re-downloads the renamed albums, because `rclone sync` cannot know a
-  folder moved — it deletes and re-fetches (~2GB). Replaying the journalled
-  renames locally first would make those free `mv`s, but there is no
-  `hark sync --renames-only` mode yet.
-- The first `hark sync` afterwards prints a "skipped" line per journal entry.
-  Expected: step 2 already moved those folders.
-
-Steps 0–2 are pure rclone and need no hark build, so track A can be finished
-before track B is started. Only step 3 needs the binary.
-
----
-
-## Track B: making it build on macOS
-
-**Use rustup and the npm Tauri CLI. Do not install Nix for this.**
-
-Nix earns its place on the Linux machine for one reason: pinning `webkitgtk`,
-which is a multi-hour source build if the pin ever slips. That reason does not
-exist on macOS, where Tauri uses the system WKWebView and cpal uses CoreAudio —
-nothing heavy to pin, and nothing nixpkgs can vendor anyway. Installing Nix on
-macOS is its own small project (APFS volume, daemon), and at the end of it you
-would be the first person ever to run the darwin shell in this flake. That is
-two unknowns stacked underneath a first-time build of an unfamiliar app.
-
-rustup plus `@tauri-apps/cli` is Tauri's own documented macOS path, so when
-something breaks the error text matches what everyone else has written about.
-
-### Setup
-
-```sh
-xcode-select --install          # WKWebView, CoreAudio, the linker
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-# node 24 via brew/fnm/asdf, whichever you prefer
-
-cd hark && npm install          # installs @tauri-apps/cli + the darwin binary
-npm run tauri dev               # the app
-```
-
-Two things in the repo exist so you don't have to decide:
-
-- **`rust-toolchain.toml`** pins 1.95.0, the same compiler the Linux flake
-  provides. rustup reads it and installs that version automatically. The
-  nixpkgs cargo on Linux ignores the file, so the two machines agree without
-  either one bending.
-- **`@tauri-apps/cli` is already in `devDependencies`** with `npm run tauri`
-  wired up, and `package-lock.json` already carries `cli-darwin-arm64`, so
-  `npm install` is all it takes. Linux is unaffected — it still uses
-  `cargo tauri` from nixpkgs. The two CLIs are 2.11.0 and 2.12.2 respectively;
-  both drive the `tauri = "2"` crate and the skew does not matter.
-
-### Verification ladder
-
-Each rung needs more of the platform than the one above, so failures localise:
-
-```sh
-cd src-tauri && cargo test                     # 1. no GUI, no audio device
-cargo run --bin scan_report -- ~/music         # 2. library layer, real files
-cargo run --bin play_probe -- <album-dir> 4    # 3. CoreAudio output
-cd .. && npm run tauri dev                     # 4. the actual window
-npm run tauri build -- --no-bundle             # 5. release binary
-```
-
-Get rung 1 green before touching anything else — it needs no window and no
-audio device, so it proves the library, tag and sync layers are fine and
-isolates whatever follows to the platform shell.
-
-Friction to expect:
-
-- **Codesigning.** Stay on `--no-bundle` at first: a plain binary, no signing
-  identity needed. A `.app` bundle is a separate errand.
-- **Gatekeeper** may quarantine the built binary on first run.
-- **`src-tauri/gen/schemas/macOS-schema.json`** will appear. Commit it.
-
-What actually happened on the mac mini (macOS 15.6, M-series, rustup 1.95.0,
-npm 11): every rung passed. Rung 1 initially failed 4 of 103, all real
-platform differences, now fixed:
-
-- APFS is normalization-insensitive, so moving `Bjo◌̈rk/Debut` to `Björk/Debut`
-  reused the decomposed artist folder instead of creating an NFC one.
-  `rename::respell_sole_parent` respells it via a temp name.
-- macOS's temp dir is behind a symlink (`/var` → `/private/var`); playlist
-  entries are canonicalized but the root was not, so `relative_to` wrote
-  absolute paths. It now canonicalizes both.
-- One test's precondition ("the NFC path must not exist") cannot hold on APFS
-  and is skipped there.
-
-**Do not commit `package-lock.json` churn from the mac.** npm 11 there strips
-the `libc` fields from the Linux optional deps; the Linux side needs them.
-`git checkout package-lock.json` after `npm install`.
-
-### Installing on macOS
-
-hark runs as a normal app from `/Applications/hark.app` — Spotlight,
-Launchpad, Dock. Updating it after a code change is a rebuild plus a copy:
-
-```sh
-cd ~/hark && git checkout package-lock.json   # if npm install touched it
-npm run tauri build
-rm -rf /Applications/hark.app
-ditto src-tauri/target/release/bundle/macos/hark.app /Applications/hark.app
-```
-
-Quit the running hark first, or the old binary keeps running until you do.
-The release binary embeds the frontend, so this is needed for UI changes too;
-`npm run tauri dev` is the loop for iterating, this is for installing.
-
-What makes the bundle, all macOS-only so Linux is untouched:
-
-- **`src-tauri/tauri.macos.conf.json`** — Tauri merges it over
-  `tauri.conf.json` only when building on macOS (a JSON merge patch, so its
-  `targets` and `icon` arrays *replace* the base ones). It swaps the Linux
-  `deb` target for `app`, points at the mac icon, and sets
-  `signingIdentity: "-"`.
-- **Ad-hoc signing (`"-"`).** Without it only the binary is linker-signed and
-  the bundle is not sealed (`codesign --verify --deep --strict` fails). Ad-hoc
-  is enough for an app built and run on the same machine — a locally built
-  bundle carries no quarantine flag, so Gatekeeper does not check it. Shipping
-  it to another Mac would need a Developer ID and notarization.
-- **`src-tauri/icons/macos/`** — the Dock icon: a plain red circle (#FF3B30,
-  824px diameter on a 1024 canvas, Apple's icon-grid margin), as `icon.icns`
-  plus PNGs. Generated with CoreGraphics + `sips` + `iconutil`; to change it,
-  regenerate `icon.png` at 1024×1024 and rebuild the rest:
-
-  ```sh
-  cd src-tauri/icons/macos && mkdir hark.iconset
-  for z in 16 32 128 256 512; do
-    sips -z $z $z icon.png --out hark.iconset/icon_${z}x${z}.png
-    sips -z $((z*2)) $((z*2)) icon.png --out hark.iconset/icon_${z}x${z}@2x.png
-  done
-  iconutil -c icns hark.iconset -o icon.icns && rm -r hark.iconset
-  sips -z 32 32 icon.png --out 32x32.png && sips -z 128 128 icon.png --out 128x128.png
-  ```
-
-If the Dock shows a stale or blank icon after an update, it is the icon cache:
-`killall Dock`. To confirm what is actually installed:
-`codesign --verify --deep --strict /Applications/hark.app`.
-
-### If you would rather use Nix anyway
-
-`flake.nix` does expose `aarch64-darwin` and `x86_64-darwin` shells — the
-gtk/webkit/alsa stack and the Linux-only env exports sit behind
-`lib.optionals isLinux`. All three systems evaluate. But **the darwin shells
-have never been built or run**, since they were written on the Linux machine.
-The likely snags are `cargo-tauri` not having a darwin build on that exact
-pinned nixpkgs revision, and Apple SDK framework linking. It is a fine thing to
-fix later; it is a bad thing to fight on day one.
-
-The audio findings did not transfer, in the good direction. The 48kHz-only
-conclusion below is a fact about *the ThinkPad's* `sof-hda-dsp` sink. On the
-mac mini, `play_probe` on a 44.1kHz FLAC switched the built-in speakers from
-48000 to 44100 Hz for the duration (`system_profiler SPAudioDataType`, read
-mid-playback) — so there, native-rate playback is real.
-
----
-
-## The remote changed, 2026-10-14
-
-`innercasmalia` and `outercasmalia` were consolidated into a single B2 bucket,
-`casmalia`, and both old buckets were deleted along with the `b2-music`,
-`b2-innercasmalia`, `b2-outercasmalia` and `b2-all` remotes. There is now one
-rclone remote, `b2`, and hark!'s default is `b2:casmalia/music`.
-
-**The `music/` prefix is load-bearing now.** One bucket holds `aleph/`, `film/`,
-`writing/` and the rest alongside it, so a bisync against the bucket root would
-try to reconcile the entire archive against this collection.
-
-Each machine needs the remote configured once, with a key scoped to `casmalia`:
-
-```sh
-rclone config create b2 b2 account=<keyID> key=<applicationKey> hard_delete=false
-```
-
-`account` wants the **keyID**, not the 12-character account ID. `hard_delete`
-must be false, which is the reason the old `b2-music` remote existed at all.
-
-**A machine that has not yet synced against the new remote needs
-`hark sync --init`.** `--resync` makes path1 (local) win every conflict, so an
-out-of-date machine would push its stale copy over B2.
-
-**`--init` now checks this itself** and refuses when the two sides disagree, so
-the sequence is just:
-
-```sh
-hark sync --init
-```
-
-It runs `rclone check` first and prints either *both sides agree; the resync has
-nothing to overwrite* or a refusal naming the difference. `--force` is how you
-say you have looked and this machine is the one that is right.
-
-The guard exists because documentation was not enough: the safe order is
-"check, then init", and anyone — person or agent — reading a runbook top to
-bottom can still run the second command without acting on the first. It was
-added on 2026-10-14 specifically so the mac could be set up unattended.
-
-On the ThinkPad the move was done after confirming 2,224 files and 0
-differences, so the resync had nothing to win.
-
-The mac was done the same day, and **the guard earned its keep on its first
-run**: `--init` refused, because the mac held stale copies of one album
-(Stornoway, *Beachcombers Windowsill*, 11 tracks, each 14 bytes short of B2's
-re-tagged Oct 13 versions) plus a `library.json` missing that album from a list.
-Forcing would have pushed the old tags over the new ones. Reconciled with the
-order above (step 1 had nothing to push; step 2 pulled exactly those 12 files
-and deleted nothing), after which `--init` reported agreement and `--check`
-transferred nothing. 2,190 files on each side.
-
----
+- **`cli.rs`** parses the invocation. `hark sync`, `hark normalize` and `--help`
+  run and exit; anything else is `run_gui` in `lib.rs`, which builds the Tauri
+  app. The GUI and the CLI are the same binary.
+- **`app.rs`** holds `AppState` (library, `Store`, `ArtCache`, `Player`) behind
+  an `RwLock` and every `#[tauri::command]`. It also serves the `hark://`
+  protocol: covers are decoded and downscaled in Rust and handed to the webview
+  at tile size, because full-size bitmaps in the renderer cost gigabytes.
+- **`library/`** — `scan.rs` walks the collection (folders are the grouping
+  truth, tags are the detail), `tags.rs` reads via lofty, `edit.rs` writes,
+  `art.rs` extracts and caches covers, `store.rs` is `.hark/library.json`,
+  `playlist.rs` is M3U, `rename.rs` moves folders and `journal.rs` records the
+  moves, `norm.rs` is all the NFC handling, `view.rs` is the payload the
+  frontend gets — the whole library in one ~300KB JSON at startup, which is
+  what makes search instant and client-side.
+- **`audio/`** — one thread owning the decoder and the device. `decode.rs` is
+  symphonia, `output.rs` opens cpal at the file's own sample rate, `player.rs`
+  owns play/pause/next/previous/shuffle and pushes `PlaybackState` out as
+  `playback` events. Track changes originate here, not in the UI: a song ending
+  is a backend event.
+- **`sync.rs` / `bisync.rs`** shell out to rclone to reconcile the collection
+  with B2. `sync.rs` is the command surface (`--check`, `--init`, `--force`);
+  `bisync.rs` is the listing surgery that makes journalled renames safe.
+- **`src/`** — `main.ts` wires keys and events, `grid.ts` draws tiles,
+  `nowplaying.ts`, `search.ts` (prefix matching, deliberately dumb),
+  `modal.ts` / `playlistmodal.ts` / `picker.ts` the three overlays,
+  `api.ts` the command wrappers, `style.css` the whole design.
 
 ## Invariants worth not breaking
 
 **NFC is identity; on-disk bytes are for the filesystem.** `rel_path` and the
 keys in `library.json` are NFC. `Album::dir` is the real directory as the
-filesystem spells it. Reconstructing a path with `root.join(rel_path)` breaks
-on every folder stored decomposed — this was a real bug. Only `dir` is safe to
-pass to `fs::rename` or to join `cover.jpg` onto.
+filesystem spells it. Reconstructing a path with `root.join(rel_path)` breaks on
+every folder stored decomposed — this was a real bug. Only `dir` is safe to pass
+to `fs::rename` or to join `cover.jpg` onto.
 
-**Renames are journalled, then replayed — and bisync must be told.** Replaying
-a rename makes both sides agree on paths, but rclone bisync compares against a
+**`library.json` is the one non-standard file, and it stays hand-editable.**
+`{ "version": 1, "perfect": [...] }`, entries relative to the music root, NFC,
+slash-separated, kept sorted so diffs stay legible. Everything else hark! knows
+goes somewhere another program already reads: tags in the files, M3U playlists,
+`cover.jpg`.
+
+**M3U paths are relative to the playlist file**, which is what other players
+expect and what lets a playlist survive the trip through B2. Entries that don't
+resolve are *preserved verbatim*, never dropped — an album that is merely
+missing on this machine must not be deleted from a playlist by the act of
+adding one song to it.
+
+**lofty validates on write what it happily read.** Two classes of file here
+cannot be written naively, and both used to fail silently or with a misleading
+message. Writing re-detects the type from *content* (reading only uses the
+extension) and gives up looking for the first MPEG frame after
+`max_junk_bytes`, default 1024 — files with a second stacked ID3 tag push that
+22706 bytes out, hence `MAX_JUNK_BYTES = 64KiB` in `library/edit.rs`. And a
+`COMM` frame whose language is `\x00\x00\x00` makes lofty refuse the whole file,
+so `save_tag` retries once with comments dropped. Both paths report failures:
+`write_cover` returns a `CoverReport` with a `failed` list, because "one track
+refused the art" used to look exactly like "this album has fewer tracks".
+
+**Renames are journalled, then replayed — and bisync must be told.** Replaying a
+rename makes both sides agree on paths, but rclone bisync compares against a
 *cached listing* that still names the old path, so it sees the folder as new on
-both sides. If the album was also re-tagged in the same session the contents
-differ too, and bisync calls that a conflict and parks the real filename as
-`.conflict1`/`.conflict2` on both ends. That destroyed 43 tracks once.
-`crate::bisync` repoints those listings after each replay, and only for a side
-that genuinely moved — claiming a move that did not happen would make bisync
-read the new path as deleted and propagate that deletion.
+both sides. If the album was also re-tagged in the same session, bisync calls
+that a conflict and parks the real filename as `.conflict1`/`.conflict2` on both
+ends. That destroyed 43 tracks once. `crate::bisync` repoints those listings
+after each replay, and only for a side that genuinely moved — claiming a move
+that did not happen would make bisync read the new path as deleted and propagate
+that deletion.
 
 **`--max-delete` is a percentage in bisync**, not a count, unlike every other
-rclone subcommand. It is set to `1` (~21 files here). A trip is a halt, not
-data loss; rerun with `--force` after looking at what it wanted to remove.
+rclone subcommand. It is set to `1` (~21 files here). A trip is a halt, not data
+loss; rerun with `--force` after looking at what it wanted to remove.
 
-**lofty validates on write what it happily read.** Two separate classes of file
-in this collection cannot be written naively, and both failed *silently* or
-with a misleading message before being handled in `library/edit.rs`:
+**`sync --init` lets the local side win every conflict.** It runs
+`rclone bisync --resync`, which is `--resync-mode path1`, and hark passes local
+as path1 — so an out-of-date machine would push stale copies over B2. `--init`
+therefore runs `rclone check` first and refuses when the two sides disagree,
+naming the difference; `--force` is how you say you have looked and this side is
+right. The guard exists because the documentation wasn't enough: anyone reading
+a runbook top to bottom can run the second command without acting on the first.
 
-- Writing re-detects the file type from *content* (reading only uses the
-  extension), and the search for the first MPEG frame gives up after
-  `max_junk_bytes`, default 1024. Files with a second stacked ID3 tag or
-  padding push that as far as 22706 bytes out. Hence `MAX_JUNK_BYTES = 64KiB`.
-- A `COMM` frame whose language is `\x00\x00\x00` rather than three ASCII
-  characters makes lofty refuse the whole file. `save_tag` retries once with
-  comments dropped.
-
-Both paths report failures now; `write_cover` returns a `CoverReport` with a
-`failed` list rather than a bare count, because "one track refused the art"
-used to look exactly like "this album has fewer tracks".
+**A production build needs the `custom-protocol` feature.** `tauri`'s build
+script does `dev = !custom_protocol`, so a binary built without it ignores its
+own embedded frontend and tries to load `build.devUrl` — the window comes up
+saying *Could not connect to localhost: Connection refused*. `cargo tauri build`
+and `tauri-action` pass the feature for you; a bare `cargo build --release`,
+which is what the flake's `buildRustPackage` runs, does not — hence
+`buildFeatures = [ "tauri/custom-protocol" ]` there (the dependency-qualified
+name, since this crate declares no passthrough feature of its own). This costs an hour the first
+time it bites, because the failure looks exactly like a rendering bug.
 
 **Audio: the hardware here is 48kHz-only.** hark opens the device at the file's
 native rate and that part works, but every sink on this ThinkPad advertises a
 single rate, so something always resamples. Measured transparent (flat to
 15kHz, artifacts at -97dB). Do not claim native-rate playback is achieved on
-this machine. See the Audio section of `README.md`.
+this machine — on the mac mini it genuinely is. See the Audio section of
+`README.md`.
+
+## Linux vs macOS
+
+The source is shared whole; Tauri, cpal and symphonia abstract the platform.
+Where a difference is unavoidable it is `#[cfg(target_os = "…")]`, never a
+branch in the repo.
+
+- **The collection lives at `~/music` on Linux, `~/music-hark` on macOS**
+  (`library::resolve_music_dir`). APFS is case-insensitive, so `~/music` *is*
+  `~/Music` — the Music app's library, which a sync would have uploaded and then
+  mirrored over.
+- **APFS is normalization-insensitive**, so moving `Bjo◌̈rk/Debut` to
+  `Björk/Debut` reuses the decomposed artist folder instead of creating an NFC
+  one. `rename::respell_sole_parent` renames through a temp name to force it. A
+  direct rename between two normalizations of one name is a no-op there.
+- **macOS's temp dir is behind a symlink** (`/var` → `/private/var`), so
+  `playlist::relative_to` canonicalizes both the root and the entry; one test's
+  precondition ("the NFC path must not exist") cannot hold on APFS and is
+  skipped there.
+- **Self-update is macOS-only** (`src-tauri/src/update.rs`,
+  `tauri-plugin-updater` as a `cfg(target_os = "macos")` dependency). The Linux
+  build is installed into the read-only Nix store and must not try to overwrite
+  itself. A consequence: `cargo test` here never compiles `update.rs` — the
+  macOS CI job is the first compiler to see it.
+- **Bundling** is configured in `src-tauri/tauri.macos.conf.json`, which Tauri
+  merges over `tauri.conf.json` only on macOS (a JSON merge patch, so its
+  `targets` and `icon` arrays *replace* the base ones). It swaps the Linux `deb`
+  target for `app`, turns on `createUpdaterArtifacts` (Tauri's Linux updater
+  only knows AppImage, so this cannot live in the base config), points at
+  `icons/macos/` and sets `signingIdentity: "-"` — ad-hoc signing, which is
+  enough for a locally installed app and is not Apple notarization.
+- **The translucent window is macOS-only.** The base config sets the window
+  `transparent` and `app.macOSPrivateApi: true` — which in turn requires the
+  `macos-private-api` feature on the `tauri` crate, or tauri-build refuses to
+  compile with a feature-allowlist error. `tauri.linux.conf.json` turns
+  transparency back off, because on this stack — WebKitGTK 2.52.5, i3 4.24,
+  picom 2.52 — **the window surface accepts alpha but the page composites
+  opaque**, so you get the ink colour and never the desktop. Measured by
+  sampling pixels, not by eye: with the compositor running and a bright
+  wallpaper behind the window, a page that painted nothing at all let that
+  wallpaper through at full strength (246,221,201), while the real UI read
+  (9,13,21) at the same coordinates — `--ink` with no trace of what is behind
+  it. So Linux runs the configuration that was verified end to end: opaque,
+  with `backgroundColor` back. The CSS stays transparency-ready
+  (`--ink-translucent` on `html, body`, opaque panels everywhere else), so
+  retrying after a WebKitGTK bump is: delete `tauri.linux.conf.json`, start
+  `picom -b --config packaging/picom.conf`, rebuild, and sample a pixel.
+- **The toolchain differs, the compiler does not.** `rust-toolchain.toml` pins
+  1.95.0 for rustup (which is what CI uses); the nixpkgs cargo ignores the file
+  and the flake pins the same version. `src-tauri/gen/schemas/` is generated per
+  platform — `linux-schema.json` and `macOS-schema.json` are both committed;
+  don't let a build delete the other one.
