@@ -169,22 +169,28 @@ branch in the repo.
   only knows AppImage, so this cannot live in the base config), points at
   `icons/macos/` and sets `signingIdentity: "-"` — ad-hoc signing, which is
   enough for a locally installed app and is not Apple notarization.
-- **The translucent window is macOS-only.** The base config sets the window
-  `transparent` and `app.macOSPrivateApi: true` — which in turn requires the
-  `macos-private-api` feature on the `tauri` crate, or tauri-build refuses to
-  compile with a feature-allowlist error. `tauri.linux.conf.json` turns
-  transparency back off, because on this stack — WebKitGTK 2.52.5, i3 4.24,
-  picom 2.52 — **the window surface accepts alpha but the page composites
-  opaque**, so you get the ink colour and never the desktop. Measured by
-  sampling pixels, not by eye: with the compositor running and a bright
-  wallpaper behind the window, a page that painted nothing at all let that
-  wallpaper through at full strength (246,221,201), while the real UI read
-  (9,13,21) at the same coordinates — `--ink` with no trace of what is behind
-  it. So Linux runs the configuration that was verified end to end: opaque,
-  with `backgroundColor` back. The CSS stays transparency-ready
-  (`--ink-translucent` on `html, body`, opaque panels everywhere else), so
-  retrying after a WebKitGTK bump is: delete `tauri.linux.conf.json`, start
-  `picom -b --config packaging/picom.conf`, rebuild, and sample a pixel.
+- **The translucent window is both platforms now, and the blocker was never
+  the compositor.** The base config sets the window `transparent` and
+  `app.macOSPrivateApi: true` — which in turn requires the `macos-private-api`
+  feature on the `tauri` crate, or tauri-build refuses to compile with a
+  feature-allowlist error. Linux was opaque for a release because of one
+  environment variable, not because of WebKitGTK, i3 or picom:
+  **`WEBKIT_DISABLE_DMABUF_RENDERER=1` forces the unaccelerated renderer, and a
+  transparent web view on that path never paints its background.** WebKitGTK
+  reads the variable's *value*, so the fix is `0`, not unsetting it — it is set
+  in two places (the `preFixup` wrapper and the dev shell's `shellHook`) and
+  both must agree, or `cargo tauri dev` disagrees with the installed build.
+  That was the whole bug: the window surface accepted alpha, the page declined
+  to use it, and the measurement — the real UI reading flat `--ink` over a
+  bright wallpaper — was correct but blamed the wrong layer. Verified on
+  WebKitGTK 2.54.1 / i3 4.24 / picom, by screenshotting the window over a
+  wallpaper and seeing it through the page.
+
+  **A compositor is still required, just not sufficient.** i3 does not
+  composite; without `picom -b --config packaging/picom.conf` running, the 50%
+  background renders black rather than showing the desktop. Sample pixels with
+  `import -screen -window root` — plain `import -window root` grabs the
+  *uncomposited* root and will tell you the desktop is black.
 - **The toolchain differs, the compiler does not.** `rust-toolchain.toml` pins
   1.95.0 for rustup (which is what CI uses); the nixpkgs cargo ignores the file
   and the flake pins the same version. `src-tauri/gen/schemas/` is generated per

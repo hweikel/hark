@@ -113,11 +113,19 @@
             '';
 
             preFixup = ''
-              # WebKitGTK's DMA-BUF renderer paints a blank white window on a
-              # lot of Nix setups. Disabling it costs nothing for a grid of
-              # static images. This is the one dev-shell export that is a real
-              # runtime requirement rather than an i3 detail.
-              gappsWrapperArgs+=(--set WEBKIT_DISABLE_DMABUF_RENDERER 1)
+              # **Load-bearing for the translucent window.** WebKitGTK reads
+              # this variable's *value*, not just its presence, and `1` forces
+              # the unaccelerated renderer — on which a transparent web view
+              # never paints its background. That is the whole reason the Linux
+              # build looked opaque: the window had alpha, the page refused to
+              # use it. `0` keeps the accelerated path, which is what makes
+              # --ink-translucent actually composite against the desktop.
+              #
+              # --set-default, not --set: a machine whose GPU needs the
+              # unaccelerated path (the blank-white-window failure this used to
+              # guard against) can still export 1 and get an opaque window back,
+              # rather than no window at all.
+              gappsWrapperArgs+=(--set-default WEBKIT_DISABLE_DMABUF_RENDERER 0)
             '';
 
             postInstall = ''
@@ -194,10 +202,13 @@
 
             shellHook =
               (if isLinux then ''
-                # WebKitGTK's DMA-BUF renderer paints a blank white window on a
-                # lot of Nix setups. Disabling it costs nothing for a grid of
-                # static images.
-                export WEBKIT_DISABLE_DMABUF_RENDERER=1
+                # Keep WebKitGTK on its accelerated renderer: `1` here forces
+                # the unaccelerated path, where a transparent web view never
+                # paints its background, and `cargo tauri dev` comes up opaque
+                # while the installed build is translucent. Overridable, so a
+                # machine that needs the unaccelerated path can still say so.
+                # See the preFixup in this file and packaging/picom.conf.
+                export WEBKIT_DISABLE_DMABUF_RENDERER="''${WEBKIT_DISABLE_DMABUF_RENDERER:-0}"
 
                 # This machine is X11 + i3, not Wayland.
                 export GDK_BACKEND=x11

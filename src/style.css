@@ -12,10 +12,10 @@
      --ink-raised, or it would be read against whatever is on the desktop
      behind it.
 
-     It shows as 50% translucent where the window itself is transparent, which
-     today is macOS only; on Linux WebKitGTK composites the page opaque and
-     this blends against the same colour, so it is a no-op there. See
-     CLAUDE.md. */
+     It shows as 50% translucent on both platforms. On Linux that additionally
+     needs a compositor running and WebKitGTK left on its accelerated renderer;
+     see CLAUDE.md. Changing this alpha changes both platforms at once — it is
+     the one piece of the translucency that is not per-platform. */
   --ink-translucent: rgba(10, 13, 22, 0.5);
 
   /* pure red, rgb(255, 0, 0) */
