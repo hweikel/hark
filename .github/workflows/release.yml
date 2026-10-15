@@ -97,11 +97,11 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: hark! __VERSION__
           releaseBody: |
-            **macOS (Apple Silicon)** — download `hark_*_aarch64.app.tar.gz`,
+            **macOS (Apple Silicon)** — download `hark_aarch64.app.tar.gz`,
             then:
 
             ```sh
-            tar xzf hark_*_aarch64.app.tar.gz
+            tar xzf hark_aarch64.app.tar.gz
             mv hark.app /Applications/
             xattr -dr com.apple.quarantine /Applications/hark.app
             ```
@@ -115,4 +115,7 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
-          uploadUpdaterJson: ${{ matrix.updaterJson }}
+          # The input is `includeUpdaterJson`, not `uploadUpdaterJson` — the
+          # wrong name is only a warning, so v0.1.0 ran with the default (true)
+          # on both jobs and was saved by the matrix order alone.
+          includeUpdaterJson: ${{ matrix.updaterJson }}

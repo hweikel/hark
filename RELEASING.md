@@ -6,7 +6,7 @@ does not hold a clone and never compiles anything.
 
 ```
 git tag v0.1.1  ──▶  GitHub Actions ──▶  Release
-                       macos-14           hark_0.1.1_aarch64.app.tar.gz + .sig
+                       macos-14           hark_aarch64.app.tar.gz + .sig
                        ubuntu-24.04       hark_0.1.1_amd64.deb
                        tauri-action       latest.json
                                             │
@@ -56,8 +56,10 @@ unidentified developer. That costs exactly one dialog, on the first launch ever.
 
 ```sh
 cd ~/Downloads
-gh release download v0.1.1 --pattern '*aarch64.app.tar.gz'   # or curl -L -O <url>
-tar xzf hark_*_aarch64.app.tar.gz
+# The macOS asset carries no version in its name — the .deb does, the .app.tar.gz
+# does not. Don't reach for a `hark_<version>_aarch64` glob; it matches nothing.
+gh release download v0.1.1 --pattern 'hark_aarch64.app.tar.gz'   # or curl -L -O <url>
+tar xzf hark_aarch64.app.tar.gz
 rm -rf /Applications/hark.app && mv hark.app /Applications/
 xattr -dr com.apple.quarantine /Applications/hark.app
 open /Applications/hark.app
